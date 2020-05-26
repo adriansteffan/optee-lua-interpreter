@@ -1,0 +1,14 @@
+*.o
+*.files
+cscope*
+main
+*.a
+*.cmd
+*.d
+*.elf
+*.dmp
+*.map
+*.ta
+*.lds
+*.swp
+.vscode

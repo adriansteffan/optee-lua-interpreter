@@ -30,10 +30,10 @@
 #include <string.h>
 #include <stdlib.h>
 
-//#include "lua.h"
-//#include "lprefix.h"
-//#include "lauxlib.h"
-//#include "lualib.h"
+#include "lua.h"
+#include "lprefix.h"
+#include "lauxlib.h"
+#include "lualib.h"
 
 /* OP-TEE TEE client API (built by optee_client) */
 #include <tee_client_api.h>
@@ -154,18 +154,18 @@ int trusted_pcall(char* script, TEEC_Session *sess_ptr, TEEC_Context *ctx_ptr){
 	);
 	
 	/* create Lua state to be sent to the ta*/
-	//lua_State *L = luaL_newstate();  
-  	//if (L == NULL) {
-    //	printf("cannot create state: not enough memory");
-	//}
+	lua_State *L = luaL_newstate();  
+  	if (L == NULL) {
+    	printf("cannot create state: not enough memory");
+	}
 
-	//luaL_openlibs(L);
+	luaL_openlibs(L);
 	
 	/* Load the lua script from the buffer and push it*/
-	//luaL_loadbuffer(L, script, strlen(script), "lua_script");
+	luaL_loadbuffer(L, script, strlen(script), "lua_script");
 	
 	/* Push the arguments on the stack*/
-	//lua_pushnumber(L, 6);
+	lua_pushnumber(L, 6);
 
 
  	/* Set arguments for pcall */
@@ -200,7 +200,7 @@ int trusted_pcall(char* script, TEEC_Session *sess_ptr, TEEC_Context *ctx_ptr){
 	/* Dealing with return values */
 	dst = calloc(4, sizeof(char));
 	memcpy(dst, shm.buffer, 4);
-	//printf("Lua script in TA returned: %f\n", lua_tonumber(L, -1));
+	printf("Lua script in TA returned: %f\n", lua_tonumber(L, -1));
 
 	
 	/* Cleanup */
@@ -257,7 +257,7 @@ int main(void)
 	//invoke_script_number(script, &sess, 6);
 	//trusted_pcall(script , &sess, &ctx);
 	//save_script(script, &sess, "cubic");
-	invoke_saved_script_number(&sess, "cubic", 6);
+	invoke_saved_script_number(&sess, "cubic", 20);
 
 	TEEC_CloseSession(&sess);
 

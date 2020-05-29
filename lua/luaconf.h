@@ -655,9 +655,9 @@
 */
 #if !defined(lua_getlocaledecpoint)
 #ifdef TRUSTED_APP
-#define lua_getlocaledecpoint()     '.'
+#define lua_getlocaledecpoint()     '.' 
 #else
-#define lua_getlocaledecpoint()		(localeconv()->decimal_point[0])
+#define lua_getlocaledecpoint()		'.'//(localeconv()->decimal_point[0]) the rich world does not support a full stdlib either
 #endif
 #endif
 

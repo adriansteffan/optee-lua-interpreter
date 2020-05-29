@@ -47,6 +47,10 @@ void MSG_LUA_ERROR(lua_State *L, char *msg){
 		msg, lua_tostring(L, -1));
 }
 
+int check_signature(){
+	
+}
+
 /*
  * Called when the instance of the TA is created. This is the first call in
  * the TA.

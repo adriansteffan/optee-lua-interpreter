@@ -6,10 +6,10 @@ OBJCOPY ?= $(CROSS_COMPILE)objcopy
 OBJDUMP ?= $(CROSS_COMPILE)objdump
 READELF ?= $(CROSS_COMPILE)readelf
 
-#SRCS = $(wildcard ../lua/*.c)
-#OBJS = $(patsubst %.c,%.o,$(SRCS))
+SRCS = $(wildcard ../lua/*.c)
+OBJS = $(patsubst %.c,%.o,$(SRCS))
 
-OBJS = main.o
+SRCS += main.c
 
 CFLAGS += -Wall -I../ta/include -I$(TEEC_EXPORT)/include -I./include -I../lua
 #Add/link other required libraries here
@@ -21,8 +21,8 @@ BINARY = invoke_lua_interpreter
 all: $(BINARY)
 
  
-$(BINARY): $(OBJS)
-	$(CC) -o $@ $< $(LDADD)
+$(BINARY): $(SRCS)
+	$(CC) $(CFLAGS) -o $@ $(SRCS) $(LDADD)
 
 .PHONY: clean
 clean:

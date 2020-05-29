@@ -37,6 +37,10 @@
 		{ 0x89, 0xa9, 0xc2, 0x94, 0xe3, 0xd7, 0x8c, 0xd5} }
 
 /* The function IDs implemented in this TA */
-#define TA_RUN_LUA_SCRIPT		0
+#define TA_PCALL		0
+#define TA_RUN_LUA_SCRIPT_MATH		1
+#define TA_RUN_SAVED_LUA_SCRIPT_MATH		2
+#define TA_SAVE_LUA_SCRIPT		3
+
 
 #endif /*TA_LUA_RUNTIME_H*/

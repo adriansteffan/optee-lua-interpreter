@@ -226,7 +226,7 @@ LUALIB_API void (luaL_openlib) (lua_State *L, const char *libname,
 #ifdef TRUSTED_APP_BUILD
 #define lua_writeline()
 #else
-#define lua_writeline()        (lua_writestring("\n", 1), fflush(stdout))
+#define lua_writeline()        // (lua_writestring("\n", 1), fflush(stdout)) the rich world does not support a full stdlib either
 #endif
 #endif
 
@@ -236,8 +236,7 @@ LUALIB_API void (luaL_openlib) (lua_State *L, const char *libname,
 #define lua_writestringerror(s,p) \
 		(MSG( (s), (p) ))
 #else
-#define lua_writestringerror(s,p) \
-        (fprintf(stderr, (s), (p)), fflush(stderr))
+#define lua_writestringerror(s,p) (printf((s), (p)) // c(fprintf(stderr, (s), (p)), fflush(stderr)) the rich world does not support a full stdlib either
 #endif
 #endif
 

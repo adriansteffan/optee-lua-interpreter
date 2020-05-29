@@ -45,11 +45,11 @@
 */
 #if !defined(luai_makeseed)
 #include <time.h>
-#ifdef TRUSTED_APP
+//#ifdef TRUSTED_APP
 #define luai_makeseed()     cast(unsigned int, rand())
-#else
-#define luai_makeseed()		cast(unsigned int, time(NULL))
-#endif
+//#else
+//#define luai_makeseed()		cast(unsigned int, time(NULL)) the rich world does not support a full stdlib either
+//#endif
 #endif
 
 

@@ -7,7 +7,7 @@
 
 cd host
 
-make \
+make VEBOSE=1 \
     CROSS_COMPILE=aarch64-linux-gnu- \
     TEEC_EXPORT=~/Uni/Thesis/optee/optee_client/out/export/usr \
     --no-builtin-variables

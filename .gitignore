@@ -12,3 +12,5 @@ main
 *.lds
 *.swp
 .vscode
+
+encrypted.lua

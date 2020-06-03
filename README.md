@@ -5,7 +5,8 @@
 
 
 ### Prerequisites
-
+(testing: python3-pip)
+pycryptodome
 
 ### Installing
 

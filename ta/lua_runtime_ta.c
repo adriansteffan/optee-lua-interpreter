@@ -41,14 +41,38 @@
 #include "lauxlib.h"
 #include "lualib.h"
 
+#include "cryptoutils.h"
+
 
 void MSG_LUA_ERROR(lua_State *L, char *msg){
 	MSG("\nFATAL ERROR:\n  %s: %s\n\n",
 		msg, lua_tostring(L, -1));
 }
 
-int check_signature(){
+void call_lua_number(char* script, size_t script_len, int input, int* output){
+
+	lua_State *L = luaL_newstate();  /* create Lua state */
+  	if (L == NULL) {
+    	MSG("cannot create state: not enough memory");
+	}
+
+	luaL_openlibs(L);
 	
+	/* Load the lua script from the buffer */
+	luaL_loadbuffer(L, script, script_len, "lua_script");
+	
+
+	/* Push argument on the stack */
+	lua_pushnumber(L, input);                      
+    if (lua_pcall(L, 1, 1, 0))                  
+		MSG_LUA_ERROR(L, "lua_pcall() failed"); 
+ 
+	
+	/* Return value of operation */
+	*output = lua_tonumber(L, -1);
+
+    lua_close(L); 
+
 }
 
 /*
@@ -88,6 +112,7 @@ TEE_Result TA_OpenSessionEntryPoint(uint32_t param_types,
 	/* Unused parameters */
 	(void)&params;
 	(void)&sess_ctx;
+	
 
 
 	/* If return value != TEE_SUCCESS the session will not be created. */
@@ -103,41 +128,44 @@ void TA_CloseSessionEntryPoint(void __maybe_unused *sess_ctx)
 	(void)&sess_ctx;
 }
 
+
 static TEE_Result run_lua_script_math(uint32_t param_types,
 	TEE_Param params[4])
 {	
-	/* Temporary example: Calculata a R -> R function defined in the lua script */
+	/* Temporary example: Calculate a R -> R function defined in the lua script 
+		opzional:
+			uses symmetrical encryption combined with HMAC to both authenticate the source and keep the contents of the lua script secret from REE applications*/
 
-	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT, /* Reference to the buffer containing the lua script */
-						   TEE_PARAM_TYPE_VALUE_INPUT, /* Input parameter, a singular number for now */
-						   TEE_PARAM_TYPE_VALUE_OUTPUT, /* Output paramater, a singular number for now */ 
+	TEE_Result res;
+	char* script;
+	uint32_t script_len;
+	
+	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT, /* Reference to the buffer containing the encrypted lua script */
+						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter, a singular number for now b: Output paramater, a singular number for now*/
+						   TEE_PARAM_TYPE_VALUE_INPUT, /* a: Flag if the input data is plaintext or encrypted+signed*/
 						   TEE_PARAM_TYPE_NONE /* unused slot */
 						   );
 
 	if (param_types != exp_param_types)
 		return TEE_ERROR_BAD_PARAMETERS;
+
 	
-	lua_State *L = luaL_newstate();  /* create Lua state */
-  	if (L == NULL) {
-    	MSG("cannot create state: not enough memory");
+	script = params[0].memref.buffer;
+	script_len = params[0].memref.size;
+
+	/* if the buffer is not a plaintext lua script, verify and decypher the buffer first*/
+	if(params[2].value.a){
+		script = TEE_Malloc(script_len, 0);
+		verify_and_decrypt_script(params[0].memref.buffer, params[0].memref.size, script, &script_len);
 	}
-
-	luaL_openlibs(L);
 	
-	/* Load the lua script from the buffer */
-	luaL_loadbuffer(L, params[0].memref.buffer, params[0].memref.size, "lua_script");
-	
-	lua_pushnumber(L, params[1].value.a);                      
-    if (lua_pcall(L, 1, 1, 0))                  
-		MSG_LUA_ERROR(L, "lua_pcall() failed"); 
- 
-	
-	params[2].value.a = lua_tonumber(L, -1);
-	
-
-    lua_close(L); 
+	call_lua_number(script, script_len, params[1].value.a, &params[1].value.b);
 
 
+	if(params[2].value.a){
+		TEE_Free(script);	
+	}
+	
 	return TEE_SUCCESS;
 }
 
@@ -150,7 +178,7 @@ static TEE_Result save_lua_script(uint32_t param_types,
 	uint32_t exp_param_types = TEE_PARAM_TYPES(
 		TEE_PARAM_TYPE_MEMREF_INPUT, /* The name of the script under which the function will be accessible later */
 		TEE_PARAM_TYPE_MEMREF_INPUT, /* The contents of the lua script */
-		TEE_PARAM_TYPE_NONE,
+		TEE_PARAM_TYPE_VALUE_INPUT, /* a: Flag if the input data is plaintext or encrypted+signed*/
 		TEE_PARAM_TYPE_NONE
 		);
 
@@ -165,16 +193,22 @@ static TEE_Result save_lua_script(uint32_t param_types,
 	if (param_types != exp_param_types)
 		return TEE_ERROR_BAD_PARAMETERS;
 
-	
 	script_name_sz = params[0].memref.size;
 	script_name = TEE_Malloc(script_name_sz, 0);
 	if (!script_name)
 		return TEE_ERROR_OUT_OF_MEMORY;
 
-	TEE_MemMove(script_name, params[0].memref.buffer, script_name_sz);
-
 	data = (char *)params[1].memref.buffer;
 	data_sz = params[1].memref.size;
+
+	/* if the buffer is not a plaintext lua script, verify and decypher the buffer first*/
+	if(params[2].value.a){
+		data = TEE_Malloc(data_sz, 0);
+		verify_and_decrypt_script(params[1].memref.buffer, params[1].memref.size, data, &data_sz);
+	}
+
+	TEE_MemMove(script_name, params[0].memref.buffer, script_name_sz);
+	
 
 	/*
 	 * Create object in secure storage and fill with data
@@ -217,8 +251,8 @@ static TEE_Result run_saved_lua_script_math(uint32_t param_types,
 	/* Temporary example: Calculata a R -> R function defined in the saved lua script */
 
 	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT, /* name of the file in the trusted storage containing the lua script */
-						   TEE_PARAM_TYPE_VALUE_INPUT, /* Input parameter, a singular number for now */
-						   TEE_PARAM_TYPE_VALUE_OUTPUT, /* Output paramater, a singular number for now */ 
+						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter, a singular number for now b: Output paramater, a singular number for now*/
+						   TEE_PARAM_TYPE_NONE, /* unused slot */
 						   TEE_PARAM_TYPE_NONE /* unused slot */
 						   );
 
@@ -276,27 +310,7 @@ static TEE_Result run_saved_lua_script_math(uint32_t param_types,
 		goto exit;
 	}
 
-
-	
-	lua_State *L = luaL_newstate();  /* create Lua state */
-  	if (L == NULL) {
-    	MSG("cannot create state: not enough memory");
-	}
-
-	luaL_openlibs(L);
-
-	/* Load the lua script from the buffer */
-	luaL_loadbuffer(L, data , read_bytes, "lua_script");
-	
-	lua_pushnumber(L, params[1].value.a);                      
-    if (lua_pcall(L, 1, 1, 0))                  
-		MSG_LUA_ERROR(L, "lua_pcall() failed"); 
- 
-	
-	params[2].value.a = lua_tonumber(L, -1);
-	
-
-    lua_close(L); 
+	call_lua_number(data, read_bytes, params[1].value.a, &params[1].value.b);
 
 
 	return TEE_SUCCESS;
@@ -308,13 +322,14 @@ exit:
 }
 
 
-
 static TEE_Result trusted_pcall(uint32_t param_types,
 	TEE_Param params[4])
 {	
 	
-	//params[0].memref.buffer;
-
+	//lua_State *L = (lua_State*) TEE_Malloc(2000, TEE_MALLOC_FILL_ZERO);
+	//TEE_MemMove(L, params[0].memref.buffer, 2000);
+	//MSG("L->l_G->totalbytes: %ld", L->l_G->totalbytes);
+	//lua_pushnumber(L, 1); 
 	//if (lua_pcall(L, params[1].value.a, params[1].value.b, params[2].value.a))                  
 	//	MSG_LUA_ERROR(L, "lua_pcall() failed"); 
 
@@ -322,11 +337,8 @@ static TEE_Result trusted_pcall(uint32_t param_types,
 	//TEE_MemMove(dst, tmp, 4);
 	//TEE_MemMove(params[0].memref.buffer, dst, 4);
 
-
 	return TEE_SUCCESS;
-
 }
-
 
 
 /*

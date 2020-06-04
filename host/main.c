@@ -254,7 +254,7 @@ int main(void)
 
 	
 	read_in_file("script.lua", &script, &scriptlen);
-	read_in_file("encrypted.lua", &encscript, &encscriptlen);
+	read_in_file("encrypted.luata", &encscript, &encscriptlen);
 
 	/* Example function calls, mainly used for testing */
 

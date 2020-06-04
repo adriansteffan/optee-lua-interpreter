@@ -139,6 +139,10 @@ static TEE_Result run_lua_script_math(uint32_t param_types,
 	TEE_Result res;
 	char* script;
 	uint32_t script_len;
+
+	/* local buffer to temporarily copy the shared buffer from the client side. Makes sure shared memory is only read once */
+	size_t buffer_size;
+	char* local_buffer;
 	
 	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT, /* Reference to the buffer containing the encrypted lua script */
 						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter, a singular number for now b: Output paramater, a singular number for now*/
@@ -149,14 +153,17 @@ static TEE_Result run_lua_script_math(uint32_t param_types,
 	if (param_types != exp_param_types)
 		return TEE_ERROR_BAD_PARAMETERS;
 
-	
-	script = params[0].memref.buffer;
-	script_len = params[0].memref.size;
+	buffer_size = params[0].memref.size;
+	local_buffer = TEE_Malloc(buffer_size, 0);
+	TEE_MemMove(local_buffer, params[0].memref.buffer, buffer_size); 
+
+	script = local_buffer;
+	script_len = buffer_size;
 
 	/* if the buffer is not a plaintext lua script, verify and decypher the buffer first*/
 	if(params[2].value.a){
 		script = TEE_Malloc(script_len, 0);
-		verify_and_decrypt_script(params[0].memref.buffer, params[0].memref.size, script, &script_len);
+		verify_and_decrypt_script(local_buffer, buffer_size , script, &script_len);
 	}
 	
 	call_lua_number(script, script_len, params[1].value.a, &params[1].value.b);
@@ -190,6 +197,10 @@ static TEE_Result save_lua_script(uint32_t param_types,
 	size_t data_sz;
 	uint32_t obj_data_flag;
 
+	/* local buffer to temporarily copy the shared buffer from the client side. Makes sure shared memory is only read once */
+	size_t buffer_size;
+	char* local_buffer;
+
 	if (param_types != exp_param_types)
 		return TEE_ERROR_BAD_PARAMETERS;
 
@@ -198,17 +209,21 @@ static TEE_Result save_lua_script(uint32_t param_types,
 	if (!script_name)
 		return TEE_ERROR_OUT_OF_MEMORY;
 
-	data = (char *)params[1].memref.buffer;
-	data_sz = params[1].memref.size;
+	TEE_MemMove(script_name, params[0].memref.buffer, script_name_sz);
+
+	buffer_size = params[1].memref.size;
+	local_buffer = TEE_Malloc(buffer_size, 0);
+	TEE_MemMove(local_buffer, params[1].memref.buffer, buffer_size); 
+
+	data = local_buffer;
+	data_sz = buffer_size;
 
 	/* if the buffer is not a plaintext lua script, verify and decypher the buffer first*/
 	if(params[2].value.a){
 		data = TEE_Malloc(data_sz, 0);
-		verify_and_decrypt_script(params[1].memref.buffer, params[1].memref.size, data, &data_sz);
+		verify_and_decrypt_script(local_buffer, buffer_size, data, &data_sz);
 	}
 
-	TEE_MemMove(script_name, params[0].memref.buffer, script_name_sz);
-	
 
 	/*
 	 * Create object in secure storage and fill with data

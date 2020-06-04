@@ -40,5 +40,5 @@ h.update(hash_target)
 # attach salt, mac and noce to the data to be sent to the TA
 payload = salt + h.digest() + hash_target
 
-with open('encrypted.lua', 'wb') as file:
+with open('encrypted.luata', 'wb') as file:
     file.write(payload)

@@ -24,7 +24,7 @@ python3 encrypt_lua.py
 
 sudo cp ./host/invoke_lua_interpreter ../rpi3-optee/home
 sudo cp ./script.lua ../rpi3-optee/home
-sudo cp ./encrypted.lua ../rpi3-optee/home
+sudo cp ./encrypted.luata ../rpi3-optee/home
 
 sudo cp ./ta/*.ta ../rpi3-optee/lib/optee_armtz
 

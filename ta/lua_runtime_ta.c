@@ -25,6 +25,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+
 #include <inttypes.h>
 #include <tee_internal_api.h>
 #include <tee_internal_api_extensions.h>
@@ -44,9 +45,22 @@
 #include "cryptoutils.h"
 
 
+static TEE_Result run_saved_lua_script_math(char* script_name, size_t script_name_sz, int input, int* output);
+
 void MSG_LUA_ERROR(lua_State *L, char *msg){
 	MSG("\nFATAL ERROR:\n  %s: %s\n\n",
 		msg, lua_tostring(L, -1));
+}
+
+static int internal_TA_call(lua_State *L) {
+	char* script_name = luaL_checkstring(L, 1); 
+	int num = luaL_checknumber(L, 2);
+	int res;  
+
+	run_saved_lua_script_math(script_name, strlen(script_name),num,&res);
+
+	lua_pushnumber(L, res);
+	return 1;  /* number of results */
 }
 
 void call_lua_number(char* script, size_t script_len, int input, int* output){
@@ -57,16 +71,19 @@ void call_lua_number(char* script, size_t script_len, int input, int* output){
 	}
 
 	luaL_openlibs(L);
+
+	lua_pushcfunction(L, internal_TA_call);
+    lua_setglobal(L, "internal_TA_call");
 	
 	/* Load the lua script from the buffer */
-	luaL_loadbuffer(L, script, script_len, "lua_script");
+	luaL_loadbuffer(L, script, script_len, "lua_script"); 
 	
 
 	/* Push argument on the stack */
-	lua_pushnumber(L, input);                      
+	lua_pushnumber(L, input);
+	                     
     if (lua_pcall(L, 1, 1, 0))                  
 		MSG_LUA_ERROR(L, "lua_pcall() failed"); 
- 
 	
 	/* Return value of operation */
 	*output = lua_tonumber(L, -1);
@@ -143,7 +160,6 @@ static TEE_Result run_lua_script_math(uint32_t param_types,
 	/* local buffer to temporarily copy the shared buffer from the client side. Makes sure shared memory is only read once */
 	size_t buffer_size;
 	char* local_buffer;
-	
 	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT, /* Reference to the buffer containing the encrypted lua script */
 						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter, a singular number for now b: Output paramater, a singular number for now*/
 						   TEE_PARAM_TYPE_VALUE_INPUT, /* a: Flag if the input data is plaintext or encrypted+signed*/
@@ -165,10 +181,11 @@ static TEE_Result run_lua_script_math(uint32_t param_types,
 		script = TEE_Malloc(script_len, 0);
 		verify_and_decrypt_script(local_buffer, buffer_size , script, &script_len);
 	}
+
 	
 	call_lua_number(script, script_len, params[1].value.a, &params[1].value.b);
 
-
+	
 	if(params[2].value.a){
 		TEE_Free(script);	
 	}
@@ -260,7 +277,7 @@ static TEE_Result save_lua_script(uint32_t param_types,
 }
 
 
-static TEE_Result run_saved_lua_script_math(uint32_t param_types,
+static TEE_Result run_saved_lua_script_math_entry(uint32_t param_types,
 	TEE_Param params[4])
 {	
 	/* Temporary example: Calculata a R -> R function defined in the saved lua script */
@@ -271,19 +288,12 @@ static TEE_Result run_saved_lua_script_math(uint32_t param_types,
 						   TEE_PARAM_TYPE_NONE /* unused slot */
 						   );
 
-	TEE_ObjectHandle object;
-	TEE_ObjectInfo object_info;
 	TEE_Result res;
-	uint32_t read_bytes;
 	char *script_name;
 	size_t script_name_sz;
-	char *data;
-	size_t data_sz;
 
 	if (param_types != exp_param_types)
 		return TEE_ERROR_BAD_PARAMETERS;
-
-
 
 	script_name_sz = params[0].memref.size;
 	script_name = TEE_Malloc(script_name_sz, 0);
@@ -292,6 +302,26 @@ static TEE_Result run_saved_lua_script_math(uint32_t param_types,
 
 	TEE_MemMove(script_name, params[0].memref.buffer, script_name_sz);
 
+	res = run_saved_lua_script_math(script_name, script_name_sz, params[1].value.a, &params[1].value.b);
+
+
+	TEE_Free(script_name);
+	return TEE_SUCCESS;
+
+exit:
+	TEE_Free(script_name);
+	return res;
+}
+
+static TEE_Result run_saved_lua_script_math(char* script_name, size_t script_name_sz, int input, int* output)
+{	
+
+	TEE_ObjectHandle object;
+	TEE_ObjectInfo object_info;
+	TEE_Result res;
+	uint32_t read_bytes;
+	char *data;
+	size_t data_sz;
 
 	/*
 	 * Check the object exist and can be dumped into output buffer
@@ -304,7 +334,6 @@ static TEE_Result run_saved_lua_script_math(uint32_t param_types,
 					&object);
 	if (res != TEE_SUCCESS) {
 		EMSG("Failed to open persistent object, res=0x%08x", res);
-		TEE_Free(script_name);
 		return res;
 	}
 
@@ -325,15 +354,37 @@ static TEE_Result run_saved_lua_script_math(uint32_t param_types,
 		goto exit;
 	}
 
-	call_lua_number(data, read_bytes, params[1].value.a, &params[1].value.b);
+	call_lua_number(data, read_bytes, input, output);
 
-
+	
 	return TEE_SUCCESS;
 
 exit:
 	TEE_CloseObject(object);
-	TEE_Free(script_name);
 	return res;
+}
+
+static TEE_Result run_ta_math(uint32_t param_types,
+	TEE_Param params[4])
+{	
+	/* Temporary example: Calculata a R -> R function */
+
+	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_NONE, /* unused slot */
+						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter, a singular number for now b: Output paramater, a singular number for now*/
+						   TEE_PARAM_TYPE_NONE, /* unused slot */
+						   TEE_PARAM_TYPE_NONE /* unused slot */
+						   );
+
+	
+	int a = params[1].value.a;
+	for(int i = 0; i<10000000; i++){
+		a = a + 1;
+		asm("");
+	}
+	params[1].value.b = a;
+	return TEE_SUCCESS;
+	
+
 }
 
 
@@ -372,9 +423,11 @@ TEE_Result TA_InvokeCommandEntryPoint(void __maybe_unused *sess_ctx,
 	case TA_RUN_LUA_SCRIPT_MATH:
 		return run_lua_script_math(param_types, params);
 	case TA_RUN_SAVED_LUA_SCRIPT_MATH:
-		return run_saved_lua_script_math(param_types, params);
+		return run_saved_lua_script_math_entry(param_types, params);
 	case TA_SAVE_LUA_SCRIPT:
 		return save_lua_script(param_types, params);
+	case TA_MATH:
+		return run_ta_math(param_types, params);
 	default:
 		return TEE_ERROR_BAD_PARAMETERS;
 	}

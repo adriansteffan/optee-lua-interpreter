@@ -29,6 +29,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
+#include <sys/time.h>
+
 
 #include "lua.h"
 #include "lprefix.h"
@@ -76,8 +79,20 @@ int invoke_script_number(unsigned char* script, size_t scriptlen, TEEC_Session *
 	);
 
 
+	struct timeval start, end;
+
+    gettimeofday(&start, NULL);
+
 	TEEC_Result res = TEEC_InvokeCommand(sess_ptr, TA_RUN_LUA_SCRIPT_MATH, &op,
 				 &err_origin);
+
+    gettimeofday(&end, NULL);
+
+    double time_taken = end.tv_sec * 1e3 + end.tv_usec / 1e3 -
+                        start.tv_sec* 1e3 - start.tv_usec / 1e3; // in milseconds
+
+    printf("time program took %f milliseconds to execute\n", time_taken);
+
 	if (res != TEEC_SUCCESS)
 		errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x",
 			res, err_origin);
@@ -105,8 +120,21 @@ int invoke_saved_script_number(TEEC_Session *sess_ptr, char* script_name, int nu
 	);
 
 
+	
+	struct timeval start, end;
+
+    gettimeofday(&start, NULL);
+
 	TEEC_Result res = TEEC_InvokeCommand(sess_ptr, TA_RUN_SAVED_LUA_SCRIPT_MATH, &op,
 				 &err_origin);
+
+    gettimeofday(&end, NULL);
+
+    double time_taken = end.tv_sec * 1e3 + end.tv_usec / 1e3 -
+                        start.tv_sec* 1e3 - start.tv_usec / 1e3; // in milseconds
+
+    printf("time program took %f milliseconds to execute\n", time_taken);
+
 	if (res != TEEC_SUCCESS)
 		errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x",
 			res, err_origin);
@@ -116,6 +144,47 @@ int invoke_saved_script_number(TEEC_Session *sess_ptr, char* script_name, int nu
 	return 0;
 
 }
+
+int invoke_ta_number(TEEC_Session *sess_ptr, int number){  
+	
+	uint32_t err_origin;
+	TEEC_Operation op = {0};
+
+	op.params[1].value.a = number;
+
+	op.paramTypes = TEEC_PARAM_TYPES(
+		TEEC_NONE,
+		TEEC_VALUE_INOUT,
+		TEEC_NONE,
+		TEEC_NONE
+	);
+
+	struct timeval start, end;
+
+    gettimeofday(&start, NULL);
+
+	TEEC_Result res = TEEC_InvokeCommand(sess_ptr, TA_MATH, &op,
+				 &err_origin);
+
+
+    gettimeofday(&end, NULL);
+
+    double time_taken = end.tv_sec * 1e3 + end.tv_usec / 1e3 -
+                        start.tv_sec* 1e3 - start.tv_usec / 1e3; // in milseconds
+
+    printf("time program took %f milliseconds to execute\n", time_taken);
+
+	if (res != TEEC_SUCCESS)
+		errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x",
+			res, err_origin);
+
+	printf("Math TA returned: %d\n", op.params[1].value.b);
+
+	return 0;
+
+}
+
+
 
 int save_script(unsigned char* script, size_t scriptlen, TEEC_Session *sess_ptr, int b_encrypted, char* script_name){
 
@@ -258,14 +327,19 @@ int main(void)
 
 	/* Example function calls, mainly used for testing */
 
-	//invoke_script_number(script, scriptlen,&sess, LUA_MODE_PLAINTEXT, 6);
-	invoke_script_number(encscript,encscriptlen,&sess, LUA_MODE_ENCRYPTED, 6);
 
-	//save_script(script, scriptlen, &sess, LUA_MODE_PLAINTEXT, "cubic");
+	
+
+	//invoke_script_number(script, scriptlen,&sess, LUA_MODE_PLAINTEXT, 6);
+	invoke_script_number(encscript,encscriptlen,&sess, LUA_MODE_ENCRYPTED, 2);
+	//invoke_ta_number(&sess, 6);
+   
+
+	//save_script(script, scriptlen, &sess, LUA_MODE_PLAINTEXT, "long");
 	
 	//save_script(encscript,encscriptlen, &sess, LUA_MODE_ENCRYPTED, "cubic2");
 
-	//invoke_saved_script_number(&sess, "cubic2", 20);
+	//invoke_saved_script_number(&sess, "cubic", 6);
 
 	//trusted_pcall(script , &sess, &ctx);
 

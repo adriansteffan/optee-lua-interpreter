@@ -55,7 +55,7 @@ void MSG_LUA_ERROR(lua_State *L, char *msg){
 static int internal_TA_call(lua_State *L) {
 	char* script_name = luaL_checkstring(L, 1); 
 	int num = luaL_checknumber(L, 2);
-	int res;  
+	int res;
 
 	run_saved_lua_script_math(script_name, strlen(script_name),num,&res);
 
@@ -217,7 +217,6 @@ static TEE_Result save_lua_script(uint32_t param_types,
 	/* local buffer to temporarily copy the shared buffer from the client side. Makes sure shared memory is only read once */
 	size_t buffer_size;
 	char* local_buffer;
-
 	if (param_types != exp_param_types)
 		return TEE_ERROR_BAD_PARAMETERS;
 
@@ -388,24 +387,6 @@ static TEE_Result run_ta_math(uint32_t param_types,
 }
 
 
-static TEE_Result trusted_pcall(uint32_t param_types,
-	TEE_Param params[4])
-{	
-	
-	//lua_State *L = (lua_State*) TEE_Malloc(2000, TEE_MALLOC_FILL_ZERO);
-	//TEE_MemMove(L, params[0].memref.buffer, 2000);
-	//MSG("L->l_G->totalbytes: %ld", L->l_G->totalbytes);
-	//lua_pushnumber(L, 1); 
-	//if (lua_pcall(L, params[1].value.a, params[1].value.b, params[2].value.a))                  
-	//	MSG_LUA_ERROR(L, "lua_pcall() failed"); 
-
-	//dst = TEE_Malloc(4, TEE_MALLOC_FILL_ZERO);
-	//TEE_MemMove(dst, tmp, 4);
-	//TEE_MemMove(params[0].memref.buffer, dst, 4);
-
-	return TEE_SUCCESS;
-}
-
 
 /*
  * Called when a TA is invoked. sess_ctx hold that value that was
@@ -418,8 +399,6 @@ TEE_Result TA_InvokeCommandEntryPoint(void __maybe_unused *sess_ctx,
 {
 	(void)&sess_ctx;
 	switch (cmd_id) {
-	case TA_PCALL:
-		return trusted_pcall(param_types, params);
 	case TA_RUN_LUA_SCRIPT_MATH:
 		return run_lua_script_math(param_types, params);
 	case TA_RUN_SAVED_LUA_SCRIPT_MATH:

@@ -31,6 +31,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include <sys/time.h>
+#include <unistd.h>
+
+#include <dirent.h>
 
 
 #include "lua.h"
@@ -44,6 +47,20 @@
 
 /* To the the UUID (found the the TA's h-file(s)) */
 #include <lua_runtime_ta.h>
+
+#define CALL_MODE_PASS 	0
+#define CALL_MODE_SAVED	 1
+
+TEEC_Session sess;
+
+/* flag to indicate wether the encrypted lua scripts should be used */
+int encrypted_mode = LUA_MODE_ENCRYPTED;
+
+/* flag to indicate wether called lua ta scripts should be passed in for each or loaded from the secure storage */
+int call_mode = CALL_MODE_PASS;
+
+char* app_name;
+
 
 static int read_in_file(char* filename, unsigned char** out, long* outlen){
 
@@ -62,7 +79,16 @@ static int read_in_file(char* filename, unsigned char** out, long* outlen){
 	return 0;
 }
 
-int invoke_script_number(unsigned char* script, size_t scriptlen, TEEC_Session *sess_ptr, int b_encrypted, int number){  
+char* concat(const char *s1, const char *s2)
+{
+    char *result = malloc(strlen(s1) + strlen(s2) + 1);
+    strcpy(result, s1);
+    strcat(result, s2);
+    return result;
+}
+
+
+int invoke_script_number(unsigned char* script, size_t scriptlen, TEEC_Session *sess_ptr, int b_encrypted, int number, int* output){  
 	
 	uint32_t err_origin;
 	TEEC_Operation op = {0};
@@ -97,13 +123,13 @@ int invoke_script_number(unsigned char* script, size_t scriptlen, TEEC_Session *
 		errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x",
 			res, err_origin);
 
-	printf("Lua script in TA returned: %d\n", op.params[1].value.b);
+	*output = op.params[1].value.b;
 
 	return 0;
 
 }
 
-int invoke_saved_script_number(TEEC_Session *sess_ptr, char* script_name, int number){  
+int invoke_saved_script_number(TEEC_Session *sess_ptr, char* script_name, int number, int* output){  
 	
 	uint32_t err_origin;
 	TEEC_Operation op = {0};
@@ -139,13 +165,13 @@ int invoke_saved_script_number(TEEC_Session *sess_ptr, char* script_name, int nu
 		errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x",
 			res, err_origin);
 
-	printf("Lua script in TA returned: %d\n", op.params[1].value.b);
+	*output = op.params[1].value.b;
 
 	return 0;
 
 }
-
-int invoke_ta_number(TEEC_Session *sess_ptr, int number){  
+/*for comparison purposes*/
+int invoke_ta_number(TEEC_Session *sess_ptr, int number, int* output){  
 	
 	uint32_t err_origin;
 	TEEC_Operation op = {0};
@@ -178,7 +204,7 @@ int invoke_ta_number(TEEC_Session *sess_ptr, int number){
 		errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x",
 			res, err_origin);
 
-	printf("Math TA returned: %d\n", op.params[1].value.b);
+	*output = op.params[1].value.b;
 
 	return 0;
 
@@ -220,92 +246,67 @@ int save_script(unsigned char* script, size_t scriptlen, TEEC_Session *sess_ptr,
 
 }
 
+static int TA_call(lua_State *L) {
+	char* script_name = luaL_checkstring(L, 1); 
+	int num = luaL_checknumber(L, 2);
+	int res;  
+	if(call_mode){
+		invoke_saved_script_number(&sess, script_name, num, &res);
+	}else{
+		/* TODO create datastructure that keeps the scripts and names in memory */
+		unsigned char* script = NULL;
+		long scriptlen;	
 
-int trusted_pcall(char* script, TEEC_Session *sess_ptr, TEEC_Context *ctx_ptr){
+		char* subfolder = "/ta/";
+		char* file_ending = encrypted_mode ? ".luata" : ".lua"; 
 
-	/* Prepares and sends an entire lua stack to the pa to be processed */
+		char* script_path = malloc(strlen(app_name)+strlen(subfolder)+strlen(script_name)+strlen(file_ending)+1);
 
-	// uint32_t err_origin;
-	// TEEC_SharedMemory shm = {0};
-	// TEEC_Operation op = {0};
-	// const char *src = "HOST";
-	// char *dst;
+		strcat(script_path, app_name);
+		strcat(script_path, subfolder);
+		strcat(script_path, script_name);
+		strcat(script_path, file_ending);
 
+		if(access(script_path, F_OK ) != -1 ) {
+			read_in_file(script_path, &script, &scriptlen);
+			invoke_script_number(script, scriptlen, &sess, encrypted_mode, num, &res);
+		} else {
+			invoke_saved_script_number(&sess, script_name, num, &res);
+		}
+		
+		free(script_path);
+	}
 	
-	// op.paramTypes = TEEC_PARAM_TYPES(
-	// 	TEEC_MEMREF_TEMP_INOUT,
-	// 	TEEC_VALUE_INPUT,
-	// 	TEEC_VALUE_INPUT,
-	// 	TEEC_NONE
-	// );
-	
-	// /* create Lua state to be sent to the ta*/
-	// lua_State *L = luaL_newstate();  
-  	// if (L == NULL) {
-    // 	printf("cannot create state: not enough memory");
-	// }
-
-	// int stateSize = L->l_G->totalbytes;
-
-	// luaL_openlibs(L);
-	
-	// /* Load the lua script from the buffer and push it*/
-	// luaL_loadbuffer(L, script, strlen(script), "lua_script");
-	
-	// /* Push the arguments on the stack*/
-	// lua_pushnumber(L, 6);
-
-
- 	// /* Set arguments for pcall */
-	// op.params[1].value.a = 1; // Number of paramaters
-	// op.params[1].value.b = 1; // Number of return values
-	// op.params[2].value.b = 0; // Index of error function
-	
-
-
-	// /*Load Lua state into memory buffer*/
-    // op.params[0].tmpref.buffer = L;
-	// op.params[0].tmpref.size = stateSize;  
-
-	
-
-	// //lua_pcall((lua_State*)shm.buffer,1,1,0);
-	// //lua_pcall(L,1,1,0);
-
-	// /* Execute pcall on the stack in the secure environment */
-	// TEEC_InvokeCommand(sess_ptr, TA_PCALL, &op, &err_origin);
-
-
-	// /* Dealing with return values */
-	// //dst = calloc(4, sizeof(char));
-	// //memcpy(dst, shm.buffer, 4);
-	// printf("Lua script in TA returned: %f\n", lua_tonumber(L, -1));
-
-	
-	// /* Cleanup */
-	// TEEC_ReleaseSharedMemory(&shm);
-	// free(shm.buffer);
-	// //free(dst);
-	// //lua_close(L); 
-
-	return 0;
+	lua_pushnumber(L, res);
+	return 1;  /* number of results */
 }
 
 
-int main(void)
+int main(int argc, char *argv[])
 {
-
 	TEEC_Result res;
 	TEEC_Context ctx;
-	TEEC_Session sess;
 	TEEC_UUID uuid = TA_LUA_RUNTIME_UUID;
+	int opt;
 	uint32_t err_origin;
 
-	unsigned char* script = NULL;
-	long scriptlen;
+	unsigned char* host_script = NULL;
+	long host_scriptlen;
 
-	unsigned char* encscript = NULL;
-	long encscriptlen;
+	
+	while ((opt = getopt(argc, argv, "us")) != -1) {
+        switch (opt) {
+        case 'u': encrypted_mode = LUA_MODE_PLAINTEXT; break;
+        case 's': call_mode = CALL_MODE_SAVED; break;
+
+        default:
+            fprintf(stderr, "Usage: %s [-us] [lua app...]\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+	app_name = argv[argc-1];
+
 
 	/* Initialize a context connecting us to the TEE */
 	res = TEEC_InitializeContext(NULL, &ctx);
@@ -321,35 +322,88 @@ int main(void)
 		errx(1, "TEEC_Opensession failed with code 0x%x origin 0x%x",
 			res, err_origin);
 
+	DIR *dir;
+	struct dirent *ent;
+
+	char* ta_dir = concat(app_name, "/ta");
 	
-	read_in_file("script.lua", &script, &scriptlen);
-	read_in_file("encrypted.luata", &encscript, &encscriptlen);
+	if((dir = opendir(ta_dir)) != NULL){
+		while((ent = readdir(dir)) != NULL){
 
-	/* Example function calls, mainly used for testing */
+			unsigned char* script = NULL;
+			long scriptlen;
+			
+			char* file_name = malloc(strlen(ent->d_name) + 1); 
+			strcpy(file_name, ent->d_name);
+			
+			char* script_name = strtok(file_name, ".");
+			char* ext = strtok(NULL, ".");
+			
+			
+			char* ta_dir_slash = concat(ta_dir, "/");
+			char* script_path = concat(ta_dir_slash, ent->d_name);
+			if(!encrypted_mode && ext && !strcmp(ext,"lua")){
+				read_in_file(script_path, &script, &scriptlen);
+				save_script(script, scriptlen, &sess, LUA_MODE_PLAINTEXT, script_name);
+			}else if(encrypted_mode && ext && !strcmp(ext,"luata")){
+				read_in_file(script_path, &script, &scriptlen);
+				save_script(script,scriptlen, &sess, LUA_MODE_ENCRYPTED, script_name);
+			}
+			
+			
+			free(ta_dir_slash);
+			free(script);
+			free(script_path);
+			free(file_name);
+		}
+		
+		closedir (dir);
+	} else {
+		/* could not open directory */
+		perror ("");
+		return EXIT_FAILURE;
+	}
+
+	free(ta_dir);
 
 
 	
+	char* main_path = concat(app_name, "/host/main.lua");
+	read_in_file(main_path, &host_script, &host_scriptlen);
+	free(main_path);
 
-	//invoke_script_number(script, scriptlen,&sess, LUA_MODE_PLAINTEXT, 6);
-	invoke_script_number(encscript,encscriptlen,&sess, LUA_MODE_ENCRYPTED, 2);
-	//invoke_ta_number(&sess, 6);
-   
+	/* Interpret host lua script TODO: replace with actual standalone interpreter */
 
-	//save_script(script, scriptlen, &sess, LUA_MODE_PLAINTEXT, "long");
+	lua_State *L = luaL_newstate();  /* create Lua state */
+  	if (L == NULL) {
+    	printf("cannot create state: not enough memory");
+	}
+
+	luaL_openlibs(L);
+
+	lua_pushcfunction(L, TA_call);
+    lua_setglobal(L, "TA_call");
 	
-	//save_script(encscript,encscriptlen, &sess, LUA_MODE_ENCRYPTED, "cubic2");
+	/* Load the lua script from the buffer */
+	luaL_loadbuffer(L, host_script, host_scriptlen, "lua_script"); 
+	
+	                     
+    if (lua_pcall(L, 0, 1, 0))                  
+		printf("lua_pcall() failed"); 
+	
+	/* Return value of operation */
+	int output = lua_tonumber(L, -1);
+	printf("%d",output);
 
-	//invoke_saved_script_number(&sess, "cubic", 6);
+    lua_close(L); 
 
-	//trusted_pcall(script , &sess, &ctx);
-
+	
 
 	/* Cleanup session and context */
 	TEEC_CloseSession(&sess);
 	TEEC_FinalizeContext(&ctx);
 
-	free(script);
-	free(encscript);
+	free(host_script);
 
 	return 0;
 }

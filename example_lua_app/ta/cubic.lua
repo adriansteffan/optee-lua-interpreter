@@ -1,6 +1,6 @@
 -- Lua test program to run in the TA
 x=...
 
-x = internal_TA_call("cubic", x);
+x = x*x*x
 
 return(x)

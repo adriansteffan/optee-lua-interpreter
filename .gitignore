@@ -13,4 +13,4 @@ main
 *.swp
 .vscode
 
-encrypted.luata
+*.luata

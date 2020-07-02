@@ -9,9 +9,10 @@ READELF ?= $(CROSS_COMPILE)readelf
 SRCS = $(wildcard ../lua/*.c)
 OBJS = $(patsubst %.c,%.o,$(SRCS))
 
+SRCS += ../lua/extensions/lua_arguments.c
 SRCS += main.c
 
-CFLAGS += -Wall -I../ta/include -I$(TEEC_EXPORT)/include -I./include -I../lua
+CFLAGS += -Wall -I../ta/include -I$(TEEC_EXPORT)/include -I./include -I../lua -I../lua/extensions
 #Add/link other required libraries here
 LDADD += -lteec -L$(TEEC_EXPORT)/lib
 

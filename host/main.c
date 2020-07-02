@@ -88,130 +88,6 @@ char* concat(const char *s1, const char *s2)
 }
 
 
-int invoke_script_number(unsigned char* script, size_t scriptlen, TEEC_Session *sess_ptr, int b_encrypted, int number, int* output){  
-	
-	uint32_t err_origin;
-	TEEC_Operation op = {0};
-	op.params[0].tmpref.buffer = script;
-	op.params[0].tmpref.size = scriptlen;  
-	op.params[1].value.a = number;
-	op.params[2].value.a = b_encrypted;
-
-	op.paramTypes = TEEC_PARAM_TYPES(
-		TEEC_MEMREF_TEMP_INPUT,
-		TEEC_VALUE_INOUT,
-		TEEC_VALUE_INPUT,
-		TEEC_NONE
-	);
-
-
-	struct timeval start, end;
-
-    gettimeofday(&start, NULL);
-
-	TEEC_Result res = TEEC_InvokeCommand(sess_ptr, TA_RUN_LUA_SCRIPT_MATH, &op,
-				 &err_origin);
-
-    gettimeofday(&end, NULL);
-
-    double time_taken = end.tv_sec * 1e3 + end.tv_usec / 1e3 -
-                        start.tv_sec* 1e3 - start.tv_usec / 1e3; // in milseconds
-
-    printf("time program took %f milliseconds to execute\n", time_taken);
-
-	if (res != TEEC_SUCCESS)
-		errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x",
-			res, err_origin);
-
-	*output = op.params[1].value.b;
-
-	return 0;
-
-}
-
-int invoke_saved_script_number(TEEC_Session *sess_ptr, char* script_name, int number, int* output){  
-	
-	uint32_t err_origin;
-	TEEC_Operation op = {0};
-
-	op.params[0].tmpref.buffer = script_name;
-	op.params[0].tmpref.size = strlen(script_name);  
-	op.params[1].value.a = number;
-
-	op.paramTypes = TEEC_PARAM_TYPES(
-		TEEC_MEMREF_TEMP_INPUT,
-		TEEC_VALUE_INOUT,
-		TEEC_NONE,
-		TEEC_NONE
-	);
-
-
-	
-	struct timeval start, end;
-
-    gettimeofday(&start, NULL);
-
-	TEEC_Result res = TEEC_InvokeCommand(sess_ptr, TA_RUN_SAVED_LUA_SCRIPT_MATH, &op,
-				 &err_origin);
-
-    gettimeofday(&end, NULL);
-
-    double time_taken = end.tv_sec * 1e3 + end.tv_usec / 1e3 -
-                        start.tv_sec* 1e3 - start.tv_usec / 1e3; // in milseconds
-
-    printf("time program took %f milliseconds to execute\n", time_taken);
-
-	if (res != TEEC_SUCCESS)
-		errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x",
-			res, err_origin);
-
-	*output = op.params[1].value.b;
-
-	return 0;
-
-}
-/*for comparison purposes*/
-int invoke_ta_number(TEEC_Session *sess_ptr, int number, int* output){  
-	
-	uint32_t err_origin;
-	TEEC_Operation op = {0};
-
-	op.params[1].value.a = number;
-
-	op.paramTypes = TEEC_PARAM_TYPES(
-		TEEC_NONE,
-		TEEC_VALUE_INOUT,
-		TEEC_NONE,
-		TEEC_NONE
-	);
-
-	struct timeval start, end;
-
-    gettimeofday(&start, NULL);
-
-	TEEC_Result res = TEEC_InvokeCommand(sess_ptr, TA_MATH, &op,
-				 &err_origin);
-
-
-    gettimeofday(&end, NULL);
-
-    double time_taken = end.tv_sec * 1e3 + end.tv_usec / 1e3 -
-                        start.tv_sec* 1e3 - start.tv_usec / 1e3; // in milseconds
-
-    printf("time program took %f milliseconds to execute\n", time_taken);
-
-	if (res != TEEC_SUCCESS)
-		errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x",
-			res, err_origin);
-
-	*output = op.params[1].value.b;
-
-	return 0;
-
-}
-
-
-
 int save_script(unsigned char* script, size_t scriptlen, TEEC_Session *sess_ptr, int b_encrypted, char* script_name){
 
 	TEEC_Operation op;
@@ -246,19 +122,158 @@ int save_script(unsigned char* script, size_t scriptlen, TEEC_Session *sess_ptr,
 
 }
 
+
+int invoke_script(unsigned char* script, size_t scriptlen, int b_script_saved, int b_encrypted, void* input, int input_type, void* output, int *output_type){  
+	
+	
+	uint32_t err_origin;
+	TEEC_Operation op = {0};
+	int ta_command;
+
+	op.paramTypes = TEEC_PARAM_TYPES(
+		TEEC_MEMREF_TEMP_INPUT,
+		TEEC_VALUE_INOUT,
+		TEEC_VALUE_INPUT,
+		TEEC_MEMREF_TEMP_INOUT /* memory buffer used for string values and lua code used as an argument */
+	);
+
+	
+	ta_command = b_script_saved ? TA_RUN_SAVED_LUA_SCRIPT : TA_RUN_LUA_SCRIPT;
+	
+
+	op.params[0].tmpref.buffer = script;
+	op.params[0].tmpref.size = scriptlen; 
+
+	op.params[1].value.a = input_type; // will get replaced by output type
+	
+	op.params[2].value.a = b_encrypted;
+
+	op.params[3].tmpref.buffer = malloc(BYTE_BUFFER_SIZE);
+
+	switch(input_type){
+		case LUA_TYPE_NUMBER:
+			op.params[1].value.b = *((int*)input);
+			break;
+		case LUA_TYPE_STRING:
+		case LUA_TYPE_CODE:
+			strncpy(op.params[3].tmpref.buffer, *(char**)input, BYTE_BUFFER_SIZE);
+
+			op.params[3].tmpref.size = BYTE_BUFFER_SIZE;//strlen(*(char**)input);
+			break;
+		default:
+			printf("Invalid argument type supplied to invoke_script");
+			return 1;
+	}
+	
+	
+
+	struct timeval start, end;
+
+    gettimeofday(&start, NULL);
+
+	
+
+	TEEC_Result res = TEEC_InvokeCommand(&sess, ta_command, &op,
+			 &err_origin);
+    gettimeofday(&end, NULL);
+
+
+    double time_taken = end.tv_sec * 1e3 + end.tv_usec / 1e3 -
+                        start.tv_sec* 1e3 - start.tv_usec / 1e3; // in milseconds
+
+
+    printf("time program took %f milliseconds to execute\n", time_taken);
+		
+	if (res != TEEC_SUCCESS)
+		errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x",
+			res, err_origin);
+
+	
+	
+	*output_type = op.params[1].value.a;
+	
+	switch(*output_type){
+		case LUA_TYPE_NUMBER:
+			*(int*)output = op.params[1].value.b;
+			break;
+		case LUA_TYPE_STRING:
+		case LUA_TYPE_CODE:
+			*(char**)output = op.params[3].tmpref.buffer;
+			break;
+		default:
+			printf("Invalid output type supplied to invoke_script");
+			return 1;
+	}
+	
+	
+	return 0;
+
+}
+
+
+/*for comparison purposes, currently broken, fix when benchmarking*/
+int invoke_ta_number(TEEC_Session *sess_ptr, int number, int* output){  
+	
+	uint32_t err_origin;
+	TEEC_Operation op = {0};
+
+	op.params[1].value.a = number;
+
+	op.paramTypes = TEEC_PARAM_TYPES(
+		TEEC_NONE,
+		TEEC_VALUE_INOUT,
+		TEEC_NONE,
+		TEEC_NONE
+	);
+
+	struct timeval start, end;
+
+    gettimeofday(&start, NULL);
+
+	TEEC_Result res = TEEC_InvokeCommand(sess_ptr, TA, &op,
+				 &err_origin);
+
+
+    gettimeofday(&end, NULL);
+
+    double time_taken = end.tv_sec * 1e3 + end.tv_usec / 1e3 -
+                        start.tv_sec* 1e3 - start.tv_usec / 1e3; // in milseconds
+
+    printf("time program took %f milliseconds to execute\n", time_taken);
+
+	if (res != TEEC_SUCCESS)
+		errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x",
+			res, err_origin);
+
+	*output = op.params[1].value.b;
+
+	return 0;
+
+}
+
 static int TA_call(lua_State *L) {
 	char* script_name = luaL_checkstring(L, 1); 
-	int num = luaL_checknumber(L, 2);
-	int res;  
+	
+	void* lua_arg;
+	int lua_arg_type;
+	void* lua_ret; 
+	int lua_ret_type;
+	char* tmp_arg;
+
+	args_from_stack(L, 2,&lua_arg, &lua_arg_type);
+
+	/* impossible to know the datatype at the moment, either holds int or char* */
+	lua_ret = malloc(sizeof(void *));
+
 	if(call_mode){
-		invoke_saved_script_number(&sess, script_name, num, &res);
+		invoke_script(script_name, strlen(script_name), CALL_MODE_SAVED, 0, lua_arg, lua_arg_type, lua_ret, &lua_ret_type);
 	}else{
 		/* TODO create datastructure that keeps the scripts and names in memory */
 		unsigned char* script = NULL;
-		long scriptlen;	
+		long scriptlen;
 
 		char* subfolder = "/ta/";
-		char* file_ending = encrypted_mode ? ".luata" : ".lua"; 
+		char* file_ending = encrypted_mode ? ".luata" : ".lua";
 
 		char* script_path = malloc(strlen(app_name)+strlen(subfolder)+strlen(script_name)+strlen(file_ending)+1);
 
@@ -269,15 +284,17 @@ static int TA_call(lua_State *L) {
 
 		if(access(script_path, F_OK ) != -1 ) {
 			read_in_file(script_path, &script, &scriptlen);
-			invoke_script_number(script, scriptlen, &sess, encrypted_mode, num, &res);
+			invoke_script(script, scriptlen, CALL_MODE_PASS, encrypted_mode, lua_arg, lua_arg_type, lua_ret, &lua_ret_type);
 		} else {
-			invoke_saved_script_number(&sess, script_name, num, &res);
+			invoke_script(script_name, strlen(script_name), CALL_MODE_SAVED, 0, lua_arg, lua_arg_type, lua_ret, &lua_ret_type);
 		}
 		
 		free(script_path);
 	}
-	
-	lua_pushnumber(L, res);
+
+
+	stack_from_args(L, lua_ret, lua_ret_type);	
+
 	return 1;  /* number of results */
 }
 
@@ -392,8 +409,11 @@ int main(int argc, char *argv[])
 		printf("lua_pcall() failed"); 
 	
 	/* Return value of operation */
-	int output = lua_tonumber(L, -1);
-	printf("%d",output);
+	//int output = lua_tonumber(L, -1);
+	//printf("%d",output);
+
+	char* output = lua_tostring(L, -1);
+	printf("%s",output);
 
     lua_close(L); 
 

@@ -36,14 +36,20 @@
 	{ 0xdebd5a03, 0xe1c1, 0x4e16, \
 		{ 0x89, 0xa9, 0xc2, 0x94, 0xe3, 0xd7, 0x8c, 0xd5} }
 
+#define BYTE_BUFFER_SIZE 8192
+
+
 /* The function IDs implemented in this TA */
-#define TA_PCALL		0
-#define TA_RUN_LUA_SCRIPT_MATH		1
-#define TA_RUN_SAVED_LUA_SCRIPT_MATH		2
+#define TA_RUN_LUA_SCRIPT		1
+#define TA_RUN_SAVED_LUA_SCRIPT		2
 #define TA_SAVE_LUA_SCRIPT		3
-#define TA_MATH 	4
+#define TA	4
 
 #define LUA_MODE_PLAINTEXT	0
 #define LUA_MODE_ENCRYPTED	1
+
+#define LUA_TYPE_NUMBER 0
+#define LUA_TYPE_STRING 1
+#define LUA_TYPE_CODE 2
 
 #endif /*TA_LUA_RUNTIME_H*/

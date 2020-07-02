@@ -43,9 +43,10 @@
 #include "lualib.h"
 
 #include "cryptoutils.h"
+#include "lua_arguments.h"
 
 
-static TEE_Result run_saved_lua_script_math(char* script_name, size_t script_name_sz, int input, int* output);
+static TEE_Result run_saved_lua_script(char* script_name, size_t script_name_sz, void* input, int input_type, void* output, int* output_type);
 
 void MSG_LUA_ERROR(lua_State *L, char *msg){
 	MSG("\nFATAL ERROR:\n  %s: %s\n\n",
@@ -54,17 +55,27 @@ void MSG_LUA_ERROR(lua_State *L, char *msg){
 
 static int internal_TA_call(lua_State *L) {
 	char* script_name = luaL_checkstring(L, 1); 
-	int num = luaL_checknumber(L, 2);
-	int res;
+	
+	void* lua_arg;
+	int lua_arg_type;
+	void* lua_ret; 
+	int lua_ret_type;
 
-	run_saved_lua_script_math(script_name, strlen(script_name),num,&res);
+	args_from_stack(L, 2 ,&lua_arg, &lua_arg_type);
 
-	lua_pushnumber(L, res);
+	/* impossible to know the datatype at the moment, either holds int or char* */
+	lua_ret = malloc(sizeof(void *));
+
+	run_saved_lua_script(script_name, strlen(script_name),lua_arg, lua_arg_type, lua_ret, &lua_ret_type);
+
+	stack_from_args(L, lua_ret, lua_ret_type);	
+
 	return 1;  /* number of results */
 }
 
-void call_lua_number(char* script, size_t script_len, int input, int* output){
+void call_lua(char* script, size_t script_len, void* input, int input_type, void* output, int* output_type){
 
+	
 	lua_State *L = luaL_newstate();  /* create Lua state */
   	if (L == NULL) {
     	MSG("cannot create state: not enough memory");
@@ -78,15 +89,32 @@ void call_lua_number(char* script, size_t script_len, int input, int* output){
 	/* Load the lua script from the buffer */
 	luaL_loadbuffer(L, script, script_len, "lua_script"); 
 	
-
+	
 	/* Push argument on the stack */
-	lua_pushnumber(L, input);
+	stack_from_args(L, input, input_type);
+	
 	                     
     if (lua_pcall(L, 1, 1, 0))                  
 		MSG_LUA_ERROR(L, "lua_pcall() failed"); 
 	
+	
+
 	/* Return value of operation */
-	*output = lua_tonumber(L, -1);
+
+	void* tmp_out;
+	args_from_stack(L, -1 ,&tmp_out, output_type);
+
+	switch(*output_type){
+		case LUA_TYPE_NUMBER:
+			*(int*)output = *(int*)tmp_out;
+			break;
+		case LUA_TYPE_STRING:
+		case LUA_TYPE_CODE:
+			strncpy(*(char**)output, *(char**)tmp_out, BYTE_BUFFER_SIZE);
+			break;
+		default:
+			break;
+	}
 
     lua_close(L); 
 
@@ -146,11 +174,10 @@ void TA_CloseSessionEntryPoint(void __maybe_unused *sess_ctx)
 }
 
 
-static TEE_Result run_lua_script_math(uint32_t param_types,
+static TEE_Result run_lua_script(uint32_t param_types,
 	TEE_Param params[4])
 {	
-	/* Temporary example: Calculate a R -> R function defined in the lua script 
-		opzional:
+	/*optional:
 			uses symmetrical encryption combined with HMAC to both authenticate the source and keep the contents of the lua script secret from REE applications*/
 
 	TEE_Result res;
@@ -159,11 +186,12 @@ static TEE_Result run_lua_script_math(uint32_t param_types,
 
 	/* local buffer to temporarily copy the shared buffer from the client side. Makes sure shared memory is only read once */
 	size_t buffer_size;
+
 	char* local_buffer;
 	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT, /* Reference to the buffer containing the encrypted lua script */
-						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter, a singular number for now b: Output paramater, a singular number for now*/
+						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter type, b: Optional numerical number argument, gets replaced by return argument if numerical*/
 						   TEE_PARAM_TYPE_VALUE_INPUT, /* a: Flag if the input data is plaintext or encrypted+signed*/
-						   TEE_PARAM_TYPE_NONE /* unused slot */
+						   TEE_PARAM_TYPE_MEMREF_INOUT /* memory buffer used for string values and lua code used as an argument */
 						   );
 
 	if (param_types != exp_param_types)
@@ -182,8 +210,27 @@ static TEE_Result run_lua_script_math(uint32_t param_types,
 		verify_and_decrypt_script(local_buffer, buffer_size , script, &script_len);
 	}
 
+	void* lua_arg;
+
+	switch(params[1].value.a){
+		case LUA_TYPE_NUMBER:
+			lua_arg = &params[1].value.b;
+			break;
+		case LUA_TYPE_STRING:
+		case LUA_TYPE_CODE:
+			lua_arg = &params[3].memref.buffer;
+			break;
+		default:
+			printf("Invalid argument type supplied to invoke_script");
+			return 1;
+	}
 	
-	call_lua_number(script, script_len, params[1].value.a, &params[1].value.b);
+	// REFACTOR THIS!!!
+	call_lua(script, script_len, lua_arg, params[1].value.a, lua_arg, &params[1].value.a);
+
+	if(params[1].value.a == LUA_TYPE_STRING || params[1].value.a == LUA_TYPE_STRING){
+		params[3].memref.size = strlen(params[3].memref.buffer);
+	}
 
 	
 	if(params[2].value.a){
@@ -276,16 +323,16 @@ static TEE_Result save_lua_script(uint32_t param_types,
 }
 
 
-static TEE_Result run_saved_lua_script_math_entry(uint32_t param_types,
+static TEE_Result run_saved_lua_script_entry(uint32_t param_types,
 	TEE_Param params[4])
 {	
-	/* Temporary example: Calculata a R -> R function defined in the saved lua script */
 
 	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT, /* name of the file in the trusted storage containing the lua script */
-						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter, a singular number for now b: Output paramater, a singular number for now*/
-						   TEE_PARAM_TYPE_NONE, /* unused slot */
-						   TEE_PARAM_TYPE_NONE /* unused slot */
+						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter type, b: Optional numerical number argument, gets replaced by return argument if numerical*/
+						   TEE_PARAM_TYPE_VALUE_INPUT, /* unused in this function */
+						   TEE_PARAM_TYPE_MEMREF_INOUT /* memory buffer used for string values and lua code used as an argument */
 						   );
+
 
 	TEE_Result res;
 	char *script_name;
@@ -301,8 +348,26 @@ static TEE_Result run_saved_lua_script_math_entry(uint32_t param_types,
 
 	TEE_MemMove(script_name, params[0].memref.buffer, script_name_sz);
 
-	res = run_saved_lua_script_math(script_name, script_name_sz, params[1].value.a, &params[1].value.b);
+	void* lua_arg;
 
+	switch(params[1].value.a){
+		case LUA_TYPE_NUMBER:
+			lua_arg = &params[1].value.b;
+			break;
+		case LUA_TYPE_STRING:
+		case LUA_TYPE_CODE:
+			lua_arg = &params[3].memref.buffer;
+			break;
+		default:
+			printf("Invalid argument type supplied to invoke_script");
+			return 1;
+	}
+	
+	res = run_saved_lua_script(script_name, script_name_sz, lua_arg, params[1].value.a, lua_arg, &params[1].value.a);
+
+	if(params[1].value.a == LUA_TYPE_STRING || params[1].value.a == LUA_TYPE_STRING){
+		params[3].memref.size = strlen(params[3].memref.buffer);
+	}
 
 	TEE_Free(script_name);
 	return TEE_SUCCESS;
@@ -312,7 +377,7 @@ exit:
 	return res;
 }
 
-static TEE_Result run_saved_lua_script_math(char* script_name, size_t script_name_sz, int input, int* output)
+static TEE_Result run_saved_lua_script(char* script_name, size_t script_name_sz, void* input, int input_type, void* output, int* output_type)
 {	
 
 	TEE_ObjectHandle object;
@@ -352,9 +417,8 @@ static TEE_Result run_saved_lua_script_math(char* script_name, size_t script_nam
 				res, read_bytes, object_info.dataSize);
 		goto exit;
 	}
-
-	call_lua_number(data, read_bytes, input, output);
-
+	
+	call_lua(data, read_bytes, input, input_type, output, output_type);
 	
 	return TEE_SUCCESS;
 
@@ -363,7 +427,7 @@ exit:
 	return res;
 }
 
-static TEE_Result run_ta_math(uint32_t param_types,
+static TEE_Result run_ta(uint32_t param_types,
 	TEE_Param params[4])
 {	
 	/* Temporary example: Calculata a R -> R function */
@@ -374,6 +438,8 @@ static TEE_Result run_ta_math(uint32_t param_types,
 						   TEE_PARAM_TYPE_NONE /* unused slot */
 						   );
 
+	if (param_types != exp_param_types)
+		return TEE_ERROR_BAD_PARAMETERS;
 	
 	int a = params[1].value.a;
 	for(int i = 0; i<10000000; i++){
@@ -399,14 +465,14 @@ TEE_Result TA_InvokeCommandEntryPoint(void __maybe_unused *sess_ctx,
 {
 	(void)&sess_ctx;
 	switch (cmd_id) {
-	case TA_RUN_LUA_SCRIPT_MATH:
-		return run_lua_script_math(param_types, params);
-	case TA_RUN_SAVED_LUA_SCRIPT_MATH:
-		return run_saved_lua_script_math_entry(param_types, params);
+	case TA_RUN_LUA_SCRIPT:
+		return run_lua_script(param_types, params);
+	case TA_RUN_SAVED_LUA_SCRIPT:
+		return run_saved_lua_script_entry(param_types, params);
 	case TA_SAVE_LUA_SCRIPT:
 		return save_lua_script(param_types, params);
-	case TA_MATH:
-		return run_ta_math(param_types, params);
+	case TA:
+		return run_ta(param_types, params);
 	default:
 		return TEE_ERROR_BAD_PARAMETERS;
 	}

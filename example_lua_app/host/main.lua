@@ -1,4 +1,5 @@
 -- Lua test program to run in the Rich OS 
-a = 5
 
-return(TA_call("2cubicx",a))
+return TA_call("cubic", "asdasd")
+
+--return(TA_call("cubic", 6))

@@ -23,6 +23,8 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 ]]
 
+arg = ...
+
 local dumplua_closure = [[
 local closures = {}
 local function closure(t) 
@@ -228,12 +230,5 @@ function DataDumper(value, varname, fastmode, ident)
   end
 end
 
-function dump(...)
-    print(DataDumper(...), "\n---")
-end
   
--- Simple types:
-dump(8)         --> return 8
-dump(true)      --> return true
-dump()          --> return nil
-dump('Hello')
+return(DataDumper(args))

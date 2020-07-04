@@ -149,29 +149,14 @@ int invoke_script(unsigned char* script, size_t scriptlen, int b_script_saved, i
 	op.params[2].value.a = b_encrypted;
 
 	op.params[3].tmpref.buffer = malloc(BYTE_BUFFER_SIZE);
+	op.params[3].tmpref.size = BYTE_BUFFER_SIZE;
 
-	switch(input_type){
-		case LUA_TYPE_NUMBER:
-			op.params[1].value.b = *((int*)input);
-			break;
-		case LUA_TYPE_STRING:
-		case LUA_TYPE_CODE:
-			strncpy(op.params[3].tmpref.buffer, *(char**)input, BYTE_BUFFER_SIZE);
-
-			op.params[3].tmpref.size = BYTE_BUFFER_SIZE;//strlen(*(char**)input);
-			break;
-		default:
-			printf("Invalid argument type supplied to invoke_script");
-			return 1;
-	}
-	
-	
+	params_from_args_rich(input, input_type, op.params);
 
 	struct timeval start, end;
 
     gettimeofday(&start, NULL);
 
-	
 
 	TEEC_Result res = TEEC_InvokeCommand(&sess, ta_command, &op,
 			 &err_origin);
@@ -192,19 +177,7 @@ int invoke_script(unsigned char* script, size_t scriptlen, int b_script_saved, i
 	
 	*output_type = op.params[1].value.a;
 	
-	switch(*output_type){
-		case LUA_TYPE_NUMBER:
-			*(int*)output = op.params[1].value.b;
-			break;
-		case LUA_TYPE_STRING:
-		case LUA_TYPE_CODE:
-			*(char**)output = op.params[3].tmpref.buffer;
-			break;
-		default:
-			printf("Invalid output type supplied to invoke_script");
-			return 1;
-	}
-	
+	args_from_params_rich(output, op.params);
 	
 	return 0;
 
@@ -409,8 +382,6 @@ int main(int argc, char *argv[])
 		printf("lua_pcall() failed"); 
 	
 	/* Return value of operation */
-	//int output = lua_tonumber(L, -1);
-	//printf("%d",output);
 
 	char* output = lua_tostring(L, -1);
 	printf("%s",output);

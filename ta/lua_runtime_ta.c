@@ -58,16 +58,14 @@ static int internal_TA_call(lua_State *L) {
 	
 	void* lua_arg;
 	int lua_arg_type;
-	void* lua_ret; 
+	void* lua_ret = TEE_Malloc(sizeof(void*),0);; 
 	int lua_ret_type;
 
+	
 	args_from_stack(L, 2 ,&lua_arg, &lua_arg_type);
-
-	/* impossible to know the datatype at the moment, either holds int or char* */
-	lua_ret = malloc(sizeof(void *));
-
+	
 	run_saved_lua_script(script_name, strlen(script_name),lua_arg, lua_arg_type, lua_ret, &lua_ret_type);
-
+	
 	stack_from_args(L, lua_ret, lua_ret_type);	
 
 	return 1;  /* number of results */
@@ -104,15 +102,15 @@ void call_lua(char* script, size_t script_len, void* input, int input_type, void
 	void* tmp_out;
 	args_from_stack(L, -1 ,&tmp_out, output_type);
 
+	/*TODO clean this up*/
 	switch(*output_type){
 		case LUA_TYPE_NUMBER:
 			*(int*)output = *(int*)tmp_out;
 			break;
 		case LUA_TYPE_STRING:
 		case LUA_TYPE_CODE:
-			strncpy(*(char**)output, *(char**)tmp_out, BYTE_BUFFER_SIZE);
-			break;
 		default:
+			*(char**)output = *(char**)tmp_out;
 			break;
 	}
 
@@ -211,27 +209,13 @@ static TEE_Result run_lua_script(uint32_t param_types,
 	}
 
 	void* lua_arg;
+	void* lua_ret = TEE_Malloc(sizeof(void*),0);
 
-	switch(params[1].value.a){
-		case LUA_TYPE_NUMBER:
-			lua_arg = &params[1].value.b;
-			break;
-		case LUA_TYPE_STRING:
-		case LUA_TYPE_CODE:
-			lua_arg = &params[3].memref.buffer;
-			break;
-		default:
-			printf("Invalid argument type supplied to invoke_script");
-			return 1;
-	}
-	
-	// REFACTOR THIS!!!
-	call_lua(script, script_len, lua_arg, params[1].value.a, lua_arg, &params[1].value.a);
+	args_from_params_ta(&lua_arg, params);
 
-	if(params[1].value.a == LUA_TYPE_STRING || params[1].value.a == LUA_TYPE_STRING){
-		params[3].memref.size = strlen(params[3].memref.buffer);
-	}
+	call_lua(script, script_len, lua_arg, params[1].value.a, lua_ret, &params[1].value.a);
 
+	params_from_args_ta(lua_ret, params[1].value.a, params);
 	
 	if(params[2].value.a){
 		TEE_Free(script);	
@@ -349,25 +333,13 @@ static TEE_Result run_saved_lua_script_entry(uint32_t param_types,
 	TEE_MemMove(script_name, params[0].memref.buffer, script_name_sz);
 
 	void* lua_arg;
+	void* lua_ret = TEE_Malloc(sizeof(void*),0);
 
-	switch(params[1].value.a){
-		case LUA_TYPE_NUMBER:
-			lua_arg = &params[1].value.b;
-			break;
-		case LUA_TYPE_STRING:
-		case LUA_TYPE_CODE:
-			lua_arg = &params[3].memref.buffer;
-			break;
-		default:
-			printf("Invalid argument type supplied to invoke_script");
-			return 1;
-	}
-	
-	res = run_saved_lua_script(script_name, script_name_sz, lua_arg, params[1].value.a, lua_arg, &params[1].value.a);
+	args_from_params_ta(&lua_arg, params);
 
-	if(params[1].value.a == LUA_TYPE_STRING || params[1].value.a == LUA_TYPE_STRING){
-		params[3].memref.size = strlen(params[3].memref.buffer);
-	}
+	run_saved_lua_script(script_name, script_name_sz, lua_arg, params[1].value.a, lua_ret, &params[1].value.a);
+
+	params_from_args_ta(lua_ret, params[1].value.a, params);
 
 	TEE_Free(script_name);
 	return TEE_SUCCESS;
@@ -419,7 +391,7 @@ static TEE_Result run_saved_lua_script(char* script_name, size_t script_name_sz,
 	}
 	
 	call_lua(data, read_bytes, input, input_type, output, output_type);
-	
+
 	return TEE_SUCCESS;
 
 exit:

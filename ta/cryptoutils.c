@@ -22,13 +22,6 @@
 
 /*
  * Function taken from https://github.com/linaro-swg/optee_examples/blob/master/hotp/ta/hotp_ta.c
- *  HMAC a block of memory to produce the authentication
- *  @param key       The secret key
- *  @param keylen    The length of the secret key (bytes)
- *  @param in        The data to HMAC
- *  @param inlen     The length of the data to HMAC (bytes)
- *  @param out       [out] Destination of the authentication tag
- *  @param outlen    [in/out] Max size and resulting size of authentication tag
  */
 TEE_Result hmac_sha512(const uint8_t *key, const size_t keylen,
 			    const uint8_t *in, const size_t inlen,
@@ -102,14 +95,6 @@ exit:
 
 
 // TODO tidy up this functions and take better care of error handeling
-
-/*
- *  Check the mac of the payload and decrypt it using keys generated with hkdf, generating a plaintext lua script
- *  @param buffer        The read file buffer: [salt (16 Bytes)][mac (64 Bytes)][nonce (8 Byte)][aes encrypted lua script]
- *  @param bufferlen     The length of the buffer
- *  @param out       [out] Destination of the plaintext lua script
- *  @param outlen    [in/out] Max size and resulting size of plaintext script
- */
 TEE_Result verify_and_decrypt_script(uint8_t *buffer, const size_t bufferlen, uint8_t *out, uint32_t *outlen)
 {
 
@@ -125,8 +110,6 @@ TEE_Result verify_and_decrypt_script(uint8_t *buffer, const size_t bufferlen, ui
 	size_t okm_len = KEY_LEN/4;
 
 	
-
-	// Decryption
 	TEE_OperationHandle aes_op_handle = TEE_HANDLE_NULL;
 	TEE_ObjectHandle aes_key_handle= TEE_HANDLE_NULL;
 	TEE_Attribute aes_attr;
@@ -215,11 +198,6 @@ TEE_Result verify_and_decrypt_script(uint8_t *buffer, const size_t bufferlen, ui
 		EMSG("MAC did not match the data");
 		goto err;
 	}
-
-	//for(int i = 0; i < mac_cmp_len; i++){
-	//	printf("MAC (%02d): %02X\n", i, ( (unsigned char*) &(mac_cmp_buffer)) [i]);
-	//}
-
 
 	/* Decryption */
 	

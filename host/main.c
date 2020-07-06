@@ -88,7 +88,15 @@ char* concat(const char *s1, const char *s2)
 }
 
 
-int save_script(unsigned char* script, size_t scriptlen, TEEC_Session *sess_ptr, int b_encrypted, char* script_name){
+/**
+ * Saves a Lua script to the TA storage. It can later be called without needing to resend the script from the rich OS side.
+ *
+ * @param script         [in] The Lua script to be saved
+ * @param scriptlen      [in] The length of the Lua script
+ * @param b_encrypted    [in] An integer flag indicating wether the lua script is encrypted or plaintext.
+ * @param script_name    [in] The name that the Lua script will be invoked with once saved
+ */
+int save_script(unsigned char* script, size_t scriptlen, int b_encrypted, char* script_name){
 
 	TEEC_Operation op;
 	uint32_t origin;
@@ -107,7 +115,7 @@ int save_script(unsigned char* script, size_t scriptlen, TEEC_Session *sess_ptr,
 
 	op.params[2].value.a = b_encrypted;
 
-	res = TEEC_InvokeCommand(sess_ptr,
+	res = TEEC_InvokeCommand(&sess,
 				 TA_SAVE_LUA_SCRIPT,
 				 &op, &origin);
 
@@ -122,7 +130,19 @@ int save_script(unsigned char* script, size_t scriptlen, TEEC_Session *sess_ptr,
 
 }
 
-
+/**
+ * Runs a Lua script in the TA interpreter with the given argument and gets the return value from the returning params.
+ *
+ * @param script         [in] The Lua script OR the name of the Lua script to be run
+ * @param scriptlen      [in] The length of the Lua script OR the length of the name of the Lua script
+ * @param b_script_saved [in] An integer flag indicating wether to send in the Lua script or call one already saved in the secure TA storage.
+ * 							  script and scriptlen are interpreted accordingly.
+ * @param b_encrypted    [in] An integer flag indicating wether the lua script is encrypted or plaintext. (unused if b_script_saved == TRUE)
+ * @param input          [in] A pointer to the input argument
+ * @param input_type     [in] An integer flag indicating the type of the input argument  
+ * @param output  		 [out] A pointer which will point to the return value 
+ * @param output_type  	 [out] An integer flag indicating the type of the return value
+ */
 int invoke_script(unsigned char* script, size_t scriptlen, int b_script_saved, int b_encrypted, void* input, int input_type, void* output, int *output_type){  
 	
 	
@@ -184,7 +204,7 @@ int invoke_script(unsigned char* script, size_t scriptlen, int b_script_saved, i
 }
 
 
-/*for comparison purposes, currently broken, fix when benchmarking*/
+/* for comparison purposes, currently broken, fix when benchmarking */
 int invoke_ta_number(TEEC_Session *sess_ptr, int number, int* output){  
 	
 	uint32_t err_origin;
@@ -224,32 +244,35 @@ int invoke_ta_number(TEEC_Session *sess_ptr, int number, int* output){
 
 }
 
+/**
+ * Invokes a Lua TA from inside a Lua script on the rich OS side. Only called by Lua scripts.
+ *
+ * @param L   [in/out] The Lua stack passed from the Lua script
+ */
 static int TA_call(lua_State *L) {
-	char* script_name = luaL_checkstring(L, 1); 
-	
+	 
 	void* lua_arg;
 	int lua_arg_type;
-	void* lua_ret; 
+	void* lua_ret = malloc(sizeof(void *)); 
 	int lua_ret_type;
-	char* tmp_arg;
+
+	char* script_name = luaL_checkstring(L, 1);
 
 	args_from_stack(L, 2,&lua_arg, &lua_arg_type);
 
-	/* impossible to know the datatype at the moment, either holds int or char* */
-	lua_ret = malloc(sizeof(void *));
-
-	if(call_mode){
+	if(call_mode == CALL_MODE_SAVED){
 		invoke_script(script_name, strlen(script_name), CALL_MODE_SAVED, 0, lua_arg, lua_arg_type, lua_ret, &lua_ret_type);
 	}else{
-		/* TODO create datastructure that keeps the scripts and names in memory */
+
+		/* For a performance increase, send in Lua TA scripts that are called instead of invoking scripts saved in the internal TA storage */
+		/* TODO create datastructure that keeps the scripts and names in memory instead of loading files every time*/
 		unsigned char* script = NULL;
 		long scriptlen;
 
+		/* Build the file path string */
 		char* subfolder = "/ta/";
 		char* file_ending = encrypted_mode ? ".luata" : ".lua";
-
 		char* script_path = malloc(strlen(app_name)+strlen(subfolder)+strlen(script_name)+strlen(file_ending)+1);
-
 		strcat(script_path, app_name);
 		strcat(script_path, subfolder);
 		strcat(script_path, script_name);
@@ -259,6 +282,7 @@ static int TA_call(lua_State *L) {
 			read_in_file(script_path, &script, &scriptlen);
 			invoke_script(script, scriptlen, CALL_MODE_PASS, encrypted_mode, lua_arg, lua_arg_type, lua_ret, &lua_ret_type);
 		} else {
+			/* If no file with the name was found, fall back on the TA secure storage*/
 			invoke_script(script_name, strlen(script_name), CALL_MODE_SAVED, 0, lua_arg, lua_arg_type, lua_ret, &lua_ret_type);
 		}
 		
@@ -318,28 +342,29 @@ int main(int argc, char *argv[])
 	char* ta_dir = concat(app_name, "/ta");
 	
 	if((dir = opendir(ta_dir)) != NULL){
-		while((ent = readdir(dir)) != NULL){
 
+		/* Save all Lua TA scripts (contained in the /ta/ folder) in the TA secure storage to allow for internal calls between the scripts */
+		while((ent = readdir(dir)) != NULL){
+			
 			unsigned char* script = NULL;
 			long scriptlen;
 			
+			/* Build the file name */
 			char* file_name = malloc(strlen(ent->d_name) + 1); 
 			strcpy(file_name, ent->d_name);
 			
 			char* script_name = strtok(file_name, ".");
 			char* ext = strtok(NULL, ".");
 			
-			
 			char* ta_dir_slash = concat(ta_dir, "/");
 			char* script_path = concat(ta_dir_slash, ent->d_name);
 			if(!encrypted_mode && ext && !strcmp(ext,"lua")){
 				read_in_file(script_path, &script, &scriptlen);
-				save_script(script, scriptlen, &sess, LUA_MODE_PLAINTEXT, script_name);
+				save_script(script, scriptlen, LUA_MODE_PLAINTEXT, script_name);
 			}else if(encrypted_mode && ext && !strcmp(ext,"luata")){
 				read_in_file(script_path, &script, &scriptlen);
-				save_script(script,scriptlen, &sess, LUA_MODE_ENCRYPTED, script_name);
+				save_script(script,scriptlen, LUA_MODE_ENCRYPTED, script_name);
 			}
-			
 			
 			free(ta_dir_slash);
 			free(script);
@@ -355,9 +380,8 @@ int main(int argc, char *argv[])
 	}
 
 	free(ta_dir);
-
-
 	
+	/* Load /host/main.lua, the entrypoint for the rich OS Lua script */
 	char* main_path = concat(app_name, "/host/main.lua");
 	read_in_file(main_path, &host_script, &host_scriptlen);
 	free(main_path);
@@ -371,25 +395,24 @@ int main(int argc, char *argv[])
 
 	luaL_openlibs(L);
 
+	/* Register the function for calling TA Lua scripts with the state */
 	lua_pushcfunction(L, TA_call);
     lua_setglobal(L, "TA_call");
 	
 	/* Load the lua script from the buffer */
 	luaL_loadbuffer(L, host_script, host_scriptlen, "lua_script"); 
 	
-	                     
+	/* Run the main Lua script */                     
     if (lua_pcall(L, 0, 1, 0))                  
 		printf("lua_pcall() failed"); 
 	
-	/* Return value of operation */
 
+	/* Return value of operation, for testing purposes */
 	char* output = lua_tostring(L, -1);
 	printf("%s",output);
 
     lua_close(L); 
-
 	
-
 	/* Cleanup session and context */
 	TEEC_CloseSession(&sess);
 	TEEC_FinalizeContext(&ctx);

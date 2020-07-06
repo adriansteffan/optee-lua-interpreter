@@ -46,34 +46,33 @@
 #include "lua_arguments.h"
 
 
-static TEE_Result run_saved_lua_script(char* script_name, size_t script_name_sz, void* input, int input_type, void* output, int* output_type);
+
 
 void MSG_LUA_ERROR(lua_State *L, char *msg){
 	MSG("\nFATAL ERROR:\n  %s: %s\n\n",
 		msg, lua_tostring(L, -1));
 }
 
-static int internal_TA_call(lua_State *L) {
-	char* script_name = luaL_checkstring(L, 1); 
-	
+int internal_TA_call(lua_State *L) {
+
 	void* lua_arg;
 	int lua_arg_type;
-	void* lua_ret = TEE_Malloc(sizeof(void*),0);; 
+	void* lua_ret; 
 	int lua_ret_type;
 
+	char* script_name = luaL_checkstring(L, 1); 
 	
-	args_from_stack(L, 2 ,&lua_arg, &lua_arg_type);
+	args_from_stack(L, 2, &lua_arg, &lua_arg_type);
 	
-	run_saved_lua_script(script_name, strlen(script_name),lua_arg, lua_arg_type, lua_ret, &lua_ret_type);
+	run_saved_lua_script(script_name, strlen(script_name),lua_arg, lua_arg_type, &lua_ret, &lua_ret_type);
 	
 	stack_from_args(L, lua_ret, lua_ret_type);	
 
 	return 1;  /* number of results */
 }
 
-void call_lua(char* script, size_t script_len, void* input, int input_type, void* output, int* output_type){
+void call_lua(char* script, size_t script_len, void* input, int input_type, void** output, int* output_type){
 
-	
 	lua_State *L = luaL_newstate();  /* create Lua state */
   	if (L == NULL) {
     	MSG("cannot create state: not enough memory");
@@ -81,41 +80,25 @@ void call_lua(char* script, size_t script_len, void* input, int input_type, void
 
 	luaL_openlibs(L);
 
+	/* Register the function for calling interal Lua scripts with the state */
 	lua_pushcfunction(L, internal_TA_call);
     lua_setglobal(L, "internal_TA_call");
 	
 	/* Load the lua script from the buffer */
 	luaL_loadbuffer(L, script, script_len, "lua_script"); 
 	
-	
 	/* Push argument on the stack */
 	stack_from_args(L, input, input_type);
-	
-	                     
-    if (lua_pcall(L, 1, 1, 0))                  
+
+    if (lua_pcall(L, 1, 1, 0)){            
 		MSG_LUA_ERROR(L, "lua_pcall() failed"); 
-	
-	
-
-	/* Return value of operation */
-
-	void* tmp_out;
-	args_from_stack(L, -1 ,&tmp_out, output_type);
-
-	/*TODO clean this up*/
-	switch(*output_type){
-		case LUA_TYPE_NUMBER:
-			*(int*)output = *(int*)tmp_out;
-			break;
-		case LUA_TYPE_STRING:
-		case LUA_TYPE_CODE:
-		default:
-			*(char**)output = *(char**)tmp_out;
-			break;
+		printf("%s", script);
 	}
-
+		
+	/* Return value of operation */
+	args_from_stack(L, -1 ,output, output_type);
+	
     lua_close(L); 
-
 }
 
 /*
@@ -124,7 +107,6 @@ void call_lua(char* script, size_t script_len, void* input, int input_type, void
  */
 TEE_Result TA_CreateEntryPoint(void)
 {
-
 	return TEE_SUCCESS;
 }
 
@@ -172,11 +154,9 @@ void TA_CloseSessionEntryPoint(void __maybe_unused *sess_ctx)
 }
 
 
-static TEE_Result run_lua_script(uint32_t param_types,
+TEE_Result run_lua_script(uint32_t param_types,
 	TEE_Param params[4])
 {	
-	/*optional:
-			uses symmetrical encryption combined with HMAC to both authenticate the source and keep the contents of the lua script secret from REE applications*/
 
 	TEE_Result res;
 	char* script;
@@ -186,10 +166,10 @@ static TEE_Result run_lua_script(uint32_t param_types,
 	size_t buffer_size;
 
 	char* local_buffer;
-	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT, /* Reference to the buffer containing the encrypted lua script */
-						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter type, b: Optional numerical number argument, gets replaced by return argument if numerical*/
-						   TEE_PARAM_TYPE_VALUE_INPUT, /* a: Flag if the input data is plaintext or encrypted+signed*/
-						   TEE_PARAM_TYPE_MEMREF_INOUT /* memory buffer used for string values and lua code used as an argument */
+	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT, 
+						   TEE_PARAM_TYPE_VALUE_INOUT,
+						   TEE_PARAM_TYPE_VALUE_INPUT, 
+						   TEE_PARAM_TYPE_MEMREF_INOUT 
 						   );
 
 	if (param_types != exp_param_types)
@@ -202,18 +182,18 @@ static TEE_Result run_lua_script(uint32_t param_types,
 	script = local_buffer;
 	script_len = buffer_size;
 
-	/* if the buffer is not a plaintext lua script, verify and decypher the buffer first*/
+	/* If the buffer is not a plaintext lua script, verify and decypher the buffer first*/
 	if(params[2].value.a){
 		script = TEE_Malloc(script_len, 0);
 		verify_and_decrypt_script(local_buffer, buffer_size , script, &script_len);
 	}
 
 	void* lua_arg;
-	void* lua_ret = TEE_Malloc(sizeof(void*),0);
+	void* lua_ret;
 
 	args_from_params_ta(&lua_arg, params);
 
-	call_lua(script, script_len, lua_arg, params[1].value.a, lua_ret, &params[1].value.a);
+	call_lua(script, script_len, lua_arg, params[1].value.a, &lua_ret, &params[1].value.a);
 
 	params_from_args_ta(lua_ret, params[1].value.a, params);
 	
@@ -225,15 +205,14 @@ static TEE_Result run_lua_script(uint32_t param_types,
 }
 
 
-static TEE_Result save_lua_script(uint32_t param_types,
+TEE_Result save_lua_script(uint32_t param_types,
 	TEE_Param params[4])
 {	
-	/* Saves a lua function to the secure staorage to be invoke by later calls to the ta */
 
 	uint32_t exp_param_types = TEE_PARAM_TYPES(
-		TEE_PARAM_TYPE_MEMREF_INPUT, /* The name of the script under which the function will be accessible later */
-		TEE_PARAM_TYPE_MEMREF_INPUT, /* The contents of the lua script */
-		TEE_PARAM_TYPE_VALUE_INPUT, /* a: Flag if the input data is plaintext or encrypted+signed*/
+		TEE_PARAM_TYPE_MEMREF_INPUT,
+		TEE_PARAM_TYPE_MEMREF_INPUT,
+		TEE_PARAM_TYPE_VALUE_INPUT,
 		TEE_PARAM_TYPE_NONE
 		);
 
@@ -251,11 +230,11 @@ static TEE_Result save_lua_script(uint32_t param_types,
 	if (param_types != exp_param_types)
 		return TEE_ERROR_BAD_PARAMETERS;
 
+	/* Get script name from parameters */
 	script_name_sz = params[0].memref.size;
 	script_name = TEE_Malloc(script_name_sz, 0);
 	if (!script_name)
 		return TEE_ERROR_OUT_OF_MEMORY;
-
 	TEE_MemMove(script_name, params[0].memref.buffer, script_name_sz);
 
 	buffer_size = params[1].memref.size;
@@ -293,6 +272,7 @@ static TEE_Result save_lua_script(uint32_t param_types,
 		return res;
 	}
 
+	/* Save the object to secure storage */
 	res = TEE_WriteObjectData(object, data, data_sz);
 	if (res != TEE_SUCCESS) {
 		EMSG("TEE_WriteObjectData failed 0x%08x", res);
@@ -307,16 +287,15 @@ static TEE_Result save_lua_script(uint32_t param_types,
 }
 
 
-static TEE_Result run_saved_lua_script_entry(uint32_t param_types,
+TEE_Result run_saved_lua_script_entry(uint32_t param_types,
 	TEE_Param params[4])
 {	
 
-	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT, /* name of the file in the trusted storage containing the lua script */
-						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter type, b: Optional numerical number argument, gets replaced by return argument if numerical*/
-						   TEE_PARAM_TYPE_VALUE_INPUT, /* unused in this function */
-						   TEE_PARAM_TYPE_MEMREF_INOUT /* memory buffer used for string values and lua code used as an argument */
+	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT, 
+						   TEE_PARAM_TYPE_VALUE_INOUT, 
+						   TEE_PARAM_TYPE_VALUE_INPUT, 
+						   TEE_PARAM_TYPE_MEMREF_INOUT
 						   );
-
 
 	TEE_Result res;
 	char *script_name;
@@ -325,19 +304,19 @@ static TEE_Result run_saved_lua_script_entry(uint32_t param_types,
 	if (param_types != exp_param_types)
 		return TEE_ERROR_BAD_PARAMETERS;
 
+	/* Get script name from parameters */
 	script_name_sz = params[0].memref.size;
 	script_name = TEE_Malloc(script_name_sz, 0);
 	if (!script_name)
 		return TEE_ERROR_OUT_OF_MEMORY;
-
 	TEE_MemMove(script_name, params[0].memref.buffer, script_name_sz);
 
 	void* lua_arg;
-	void* lua_ret = TEE_Malloc(sizeof(void*),0);
+	void* lua_ret;
 
 	args_from_params_ta(&lua_arg, params);
 
-	run_saved_lua_script(script_name, script_name_sz, lua_arg, params[1].value.a, lua_ret, &params[1].value.a);
+	run_saved_lua_script(script_name, script_name_sz, lua_arg, params[1].value.a, &lua_ret, &params[1].value.a);
 
 	params_from_args_ta(lua_ret, params[1].value.a, params);
 
@@ -349,7 +328,7 @@ exit:
 	return res;
 }
 
-static TEE_Result run_saved_lua_script(char* script_name, size_t script_name_sz, void* input, int input_type, void* output, int* output_type)
+TEE_Result run_saved_lua_script(char* script_name, size_t script_name_sz, void* input, int input_type, void** output, int* output_type)
 {	
 
 	TEE_ObjectHandle object;
@@ -399,15 +378,14 @@ exit:
 	return res;
 }
 
-static TEE_Result run_ta(uint32_t param_types,
+/* TODO redo for benchmarking and comparison */
+TEE_Result run_ta(uint32_t param_types,
 	TEE_Param params[4])
 {	
-	/* Temporary example: Calculata a R -> R function */
-
-	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_NONE, /* unused slot */
-						   TEE_PARAM_TYPE_VALUE_INOUT, /* a: Input parameter, a singular number for now b: Output paramater, a singular number for now*/
-						   TEE_PARAM_TYPE_NONE, /* unused slot */
-						   TEE_PARAM_TYPE_NONE /* unused slot */
+	uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_NONE, 
+						   TEE_PARAM_TYPE_VALUE_INOUT,
+						   TEE_PARAM_TYPE_NONE,
+						   TEE_PARAM_TYPE_NONE 
 						   );
 
 	if (param_types != exp_param_types)
@@ -420,7 +398,6 @@ static TEE_Result run_ta(uint32_t param_types,
 	}
 	params[1].value.b = a;
 	return TEE_SUCCESS;
-	
 
 }
 

@@ -1,4 +1,4 @@
--- Lua test program to run in the TA
+-- Test function on the trusted side
 x=...
-
-x = x*x*x
+x = x.."hmmmmm"
+return x

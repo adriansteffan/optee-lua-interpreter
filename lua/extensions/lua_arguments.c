@@ -1,3 +1,9 @@
+/**
+ * Implementations of the functions declared in lua_arguments.h
+ * 
+ * Adrian Steffan 2020
+ */
+
 #include "lua.h"
 #include "lprefix.h"
 #include "lauxlib.h"
@@ -7,7 +13,9 @@
 #include <string.h>
 
 #include <lua_runtime_ta.h>
+#include "lua_arguments.h"
 
+/* Depending on which side this code is used (rich vs ta), different apis need to be called and included */
 #ifdef TRUSTED_APP_BUILD
     #include <tee_internal_api.h>
     #include <tee_internal_api_extensions.h>
@@ -17,6 +25,13 @@
     #define MALLOC_(size) malloc(size)
 #endif
 
+/*
+*	A lua script to dump arbitrary lua objects to strings containing lua code.
+*	This script is included to provide a POC way of sending arbitrary lua objects to and from TAs.
+* 	A pure C implementation would be a more performant alternative.
+*   There are possible security concerns with sending arguments in code, so this implementation is only meant to demonstrate
+*   the possibility of sending over arbitrary data and should not be used in any production environment.
+*/
 
 char* DUMPER_SCRIPT = "--[[ DataDumper.lua\n"
 			"Copyright (c) 2007 Olivetti-Engineering SA\n"
@@ -263,21 +278,20 @@ void stack_from_args(lua_State *L, void* lua_arg, int lua_arg_type){
 		case LUA_TYPE_STRING:
 			lua_pushstring(L, *(char**)lua_arg);
 			break;
-		case LUA_TYPE_CODE:
-			
-			// UNTESTED
-			/* Load the lua arg script */
+		case LUA_TYPE_CODE: 
+			/* The lua data fits no datatype that can be directly represented in c, so deserialization is required*/
+
+			/* lua_arg points to a string containing a lua script, which is to be executed to load the contained data onto the stack*/
+			/* load the lua arg script */
 			luaL_loadbuffer(L, *(char**)lua_arg, strlen(*(char**)lua_arg), "lua_arg_script"); 
-								
+
+			/* execute the passed script, the lua argument now rests on top of the stack */					
 			if (lua_pcall(L, 0, 1, 0))                  
 				printf("lua_pcall() failed"); 
-			
-			/* Return value of operation */
 
 			break;
 		default:
-			printf("Invalid output type supplied to invoke_script");
-			return 1;
+			break;
 	}
 }
 
@@ -286,30 +300,40 @@ void args_from_stack(lua_State *L, int index,void** lua_arg, int* lua_arg_type){
 
 	switch(lua_type(L, index)){
 		case LUA_TNUMBER:
+			*lua_arg_type = LUA_TYPE_NUMBER;
 			*lua_arg = (int *) MALLOC_(sizeof(int));
 			**(int **)lua_arg = luaL_checknumber(L, index);
-			*lua_arg_type = LUA_TYPE_NUMBER;
 			break;
+
 		case LUA_TSTRING:
+			*lua_arg_type = LUA_TYPE_STRING; 
 			*lua_arg = MALLOC_(sizeof(char*));
             **(char***)lua_arg = luaL_checkstring(L, index);
-			*lua_arg_type = LUA_TYPE_STRING; 
 			break;
+
 		default:
-			// dump the string
+			/*The lua data fits no datatype that can be directly represented in c, so serialization is needed */
+
+			*lua_arg_type = LUA_TYPE_CODE;
+			
+			/* Note: This is currently broken on the TA side, as the TA runs out of heap memory when loading the dumper script */
 			luaL_loadbuffer(L, DUMPER_SCRIPT, strlen(DUMPER_SCRIPT), "lua_arg_script"); 
 			
+
+			/* put the object to be dumped on top of the stack*/
 			lua_pushvalue(L, index);
 
+			/* dump stack object to a string -> the string contains a lua script directly returning the object*/
 			if (lua_pcall(L, 1, 1, 0))                  
 				printf("lua_pcall() failed"); 
 
-
+			
+			/* get the lua script form the stack */
 			*lua_arg = MALLOC_(sizeof(char*));
             **(char***)lua_arg = luaL_checkstring(L, -1);
-			lua_pop(L,-1); // ????
 
-			*lua_arg_type = LUA_TYPE_CODE;
+
+			lua_pop(L,-1); // TODO: check if this is needed and/or breaks anything
 			break;
 	}
 }
@@ -317,19 +341,25 @@ void args_from_stack(lua_State *L, int index,void** lua_arg, int* lua_arg_type){
 
 #ifdef TRUSTED_APP_BUILD
 
-// expects the parameter handeling to be done in a specific way
+
 void params_from_args_ta(void* lua_arg, int lua_arg_type, TEE_Param params[4]){
 
-	if(lua_arg_type == LUA_TYPE_NUMBER){
-		params[1].value.b = *(int*)lua_arg;
-	}else{
-		strncpy(params[3].memref.buffer, *(char**)lua_arg, BYTE_BUFFER_SIZE);
-		params[3].memref.size = strlen(params[3].memref.buffer);
+	switch(lua_arg_type){
+		case LUA_TYPE_NUMBER:
+			params[1].value.b = *(int*)lua_arg;
+			break;
+		case LUA_TYPE_STRING:
+		case LUA_TYPE_CODE:
+			/* copy the string into the preallocated buffer (rich side)*/
+			strncpy(params[3].memref.buffer, *(char**)lua_arg, BYTE_BUFFER_SIZE);
+			params[3].memref.size = strlen(params[3].memref.buffer)+1;
+			break;
+		default:
+			break;
 	}
 }
 
-// expects the parameter handeling to be done in a specific way
-// assumes that type is in params[1].value.a and is used like that, so it doesnt set any lua arg type values
+
 void args_from_params_ta(void* lua_arg, TEE_Param params[4]){
 
 	switch(params[1].value.a){
@@ -356,6 +386,7 @@ void params_from_args_rich(void* lua_arg, int lua_arg_type, TEEC_Parameter param
 			break;
 		case LUA_TYPE_STRING:
 		case LUA_TYPE_CODE:
+			/* copy the string into the preallocated buffer (rich side)*/
 			strncpy(params[3].tmpref.buffer, *(char**)lua_arg, BYTE_BUFFER_SIZE);
 			break;
 		default:

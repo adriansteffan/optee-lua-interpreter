@@ -6,7 +6,7 @@ As this is just a poc to evaluate the capabilities of dynamic code interpreatati
 
 (This app has only been tested on a Raspberry Pi 3 Model B so far.)
 
-This source code is part of a thesis/research project done at the [TUM Chair of Connected Mobility](https://www.in.tum.de/cm/home/).
+This source code is part of my [thesis](https://adriansteffan.com/pdf/bthesis.pdf) done at the [TUM Chair of Connected Mobility](https://www.in.tum.de/cm/home/).
 
 
 
@@ -92,14 +92,9 @@ As this is heavily wip, there are still some caveats to using the interpreter:
 * [OP-TEE](https://www.op-tee.org/)
 * [Lua](https://www.lua.org/home.html)
 
-
 ## Authors
 
 * **Adrian Steffan**
-
-## License
-
-TODO: figure out exact licensing of this thing before making it public. 
 
 ## Acknowledgments
 
